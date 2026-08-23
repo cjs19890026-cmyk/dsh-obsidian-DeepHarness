@@ -104,6 +104,7 @@ export const DEFAULT_CONTEXT_WINDOW = 1_000_000;
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
   'deepseek-v4-flash': 1_000_000,
   'deepseek-v4-pro': 1_000_000,
+  'deepseek-v4-flash-vision-exp': 1_000_000,
 };
 
 /** Resolve the context window for a model id (safe default). */
