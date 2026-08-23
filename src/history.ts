@@ -1,6 +1,7 @@
 import { App, Notice } from 'obsidian';
 import * as fs from 'fs';
 import * as path from 'path';
+import { t } from './i18n';
 
 /**
  * Session-based history: completed conversations are archived as session
@@ -197,7 +198,7 @@ export class HistoryStore {
     const now = Date.now();
     return {
       id: newId(),
-      title: '新会话',
+      title: t('chat.newSession'),
       startedAt: now,
       endedAt: now,
       model: '',
@@ -236,7 +237,7 @@ export class HistoryStore {
       fs.writeFileSync(tmp, payload, 'utf8');
       fs.renameSync(tmp, this.absPath);
     } catch (e) {
-      new Notice(`历史会话保存失败: ${e instanceof Error ? e.message : String(e)}`);
+      new Notice(t('chat.historySaveFailed', { message: e instanceof Error ? e.message : String(e) }));
     }
   }
 }

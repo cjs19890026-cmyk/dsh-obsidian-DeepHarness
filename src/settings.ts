@@ -75,10 +75,16 @@ export const REASONING_OPTIONS = [
 ] as const;
 
 export const PERMISSION_OPTIONS = [
-  { id: 'read-only', label: '只读' },
-  { id: 'workspace-write', label: '工作区写入' },
-  { id: 'danger-full-access', label: '完全访问' },
+  { id: 'read-only', labelKey: 'settings.permission.readOnly' },
+  { id: 'workspace-write', labelKey: 'settings.permission.workspaceWrite' },
+  { id: 'danger-full-access', labelKey: 'settings.permission.fullAccess' },
 ] as const;
+
+/** Localized label for a permission mode id (used in chat + settings). */
+export function permissionLabel(id: string): string {
+  const o = PERMISSION_OPTIONS.find((x) => x.id === id);
+  return o ? t(o.labelKey) : id;
+}
 
 export class DshSettingTab extends PluginSettingTab {
   plugin: DshPlugin;
@@ -103,7 +109,7 @@ export class DshSettingTab extends PluginSettingTab {
     return [
       {
         type: 'group',
-        heading: '常规',
+        heading: t('settings.groupGeneral'),
         items: [
           render(t('settings.language.name'), t('settings.language.desc'), (setting) => {
             setting.addDropdown((dd) => {
@@ -204,7 +210,7 @@ export class DshSettingTab extends PluginSettingTab {
 
           render(t('settings.toolMode.name'), t('settings.toolMode.desc'), (setting) => {
             setting.addDropdown((dd) => {
-              dd.addOption('', '默认 (native)');
+              dd.addOption('', t('settings.toolModeDefault'));
               dd.addOption('native', 'Native');
               dd.addOption('code', 'Code');
               dd.addOption('both', 'Both');
@@ -237,7 +243,7 @@ export class DshSettingTab extends PluginSettingTab {
 
           render(t('settings.permission.name'), t('settings.permission.desc'), (setting) => {
             setting.addDropdown((dd) => {
-              for (const p of PERMISSION_OPTIONS) dd.addOption(p.id, p.label);
+              for (const p of PERMISSION_OPTIONS) dd.addOption(p.id, permissionLabel(p.id));
               dd.setValue(s.permissionMode).onChange(async (value) => {
                 await this.plugin.setPermissionMode(value);
                 dd.setValue(s.permissionMode);
@@ -328,7 +334,7 @@ export class DshSettingTab extends PluginSettingTab {
                   nodeLine.setText(`✓ Node.js: ${diag.nodeBin}`);
                 } else {
                   const nodeLine = setting.settingEl.createEl('p', { cls: 'dsh-check-fail' });
-                  nodeLine.setText('✗ 未找到 Node.js,请在设置中填写 node 路径');
+                  nodeLine.setText(t('settings.checkNoNode'));
                 }
               }));
           }),

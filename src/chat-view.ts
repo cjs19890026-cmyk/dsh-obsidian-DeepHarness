@@ -6,7 +6,7 @@ import { DshRunner } from './dsh-runner';
 import { buildTitleEntries, linkifyNoteTitles, type NoteInfo } from './linkify';
 import { scanSkillRoots, type SkillEntry, type ScanRoot } from './skills';
 import { SkillSuggest } from './skill-suggest';
-import { MODEL_OPTIONS, REASONING_OPTIONS, PERMISSION_OPTIONS } from './settings';
+import { MODEL_OPTIONS, REASONING_OPTIONS, PERMISSION_OPTIONS, permissionLabel } from './settings';
 import { ContextMeter, estimateTokens } from './context-meter';
 import { parseHeadlessOutput, errorHint, contextWindowFor } from './pure';
 import { HistoryTool } from './history';
@@ -73,7 +73,7 @@ export class ChatView extends ItemView {
   }
 
   getDisplayText(): string {
-    return 'Deep harness';
+    return 'DeepHarness';
   }
 
   getIcon(): string {
@@ -101,7 +101,7 @@ export class ChatView extends ItemView {
     // Header
     const header = container.createDiv({ cls: 'dsh-header' });
     const title = header.createDiv({ cls: 'dsh-header-title' });
-    title.createEl('h4', { text: 'Deep harness' });
+    title.createEl('h4', { text: 'DeepHarness' });
     title.createSpan({ cls: 'dsh-header-sub', text: 'DeepSeek · Obsidian' });
 
     this.clearBtn = header.createEl('button', { cls: 'dsh-icon-btn' });
@@ -136,7 +136,7 @@ export class ChatView extends ItemView {
 
     this.historyBtn = topToolbar.createEl('button', { cls: 'dsh-top-btn dsh-top-history' });
     setIcon(this.historyBtn, 'clock');
-    this.historyBtn.setAttribute('aria-label', '历史记录');
+    this.historyBtn.setAttribute('aria-label', t('chat.historyButton'));
     this.historyBtn.onclick = () => this.toggleHistoryPanel();
 
     // Composer card: rich chip editor + toolbar (model/effort/security/meter/send)
@@ -210,7 +210,7 @@ export class ChatView extends ItemView {
     if (effortEl) effortEl.textContent = `· ${r ? r.label : this.plugin.settings.reasoningEffort}`;
     const secLabel = this.securityTrigger.querySelector('.dsh-trigger-security-label') as HTMLElement;
     const p = PERMISSION_OPTIONS.find((x) => x.id === this.plugin.settings.permissionMode);
-    if (secLabel) secLabel.textContent = p ? p.label : this.plugin.settings.permissionMode;
+    if (secLabel) secLabel.textContent = p ? permissionLabel(p.id) : this.plugin.settings.permissionMode;
     this.securityTrigger.toggleClass(
       'dsh-trigger-danger',
       this.plugin.settings.permissionMode === 'danger-full-access',
@@ -251,7 +251,7 @@ export class ChatView extends ItemView {
     const menu = new Menu();
     for (const p of PERMISSION_OPTIONS) {
       menu.addItem((item) => item
-        .setTitle(p.label)
+        .setTitle(permissionLabel(p.id))
         .setChecked(p.id === this.plugin.settings.permissionMode)
         .onClick(() => { void this.applyPermissionMode(p.id); }));
     }
@@ -374,7 +374,7 @@ export class ChatView extends ItemView {
       const thinkToggle = thinkBlock.createEl('button', { cls: 'dsh-think-toggle' });
       const thinkChevron = thinkToggle.createSpan({ cls: 'dsh-think-chevron' });
       setIcon(thinkChevron, 'chevron-down');
-      thinkToggle.createSpan({ text: '思考过程' });
+      thinkToggle.createSpan({ text: t('chat.thinkToggle') });
       thinkBody = thinkBlock.createDiv({ cls: 'dsh-think-body' });
       thinkToggle.onclick = () => {
         const collapsed = thinkBody!.classList.contains('hidden');
@@ -449,7 +449,7 @@ export class ChatView extends ItemView {
             }
             const lineText = evt.summary
               ? evt.summary
-              : evt.ok ? '(执行完成,无输出)' : '(执行失败)';
+              : evt.ok ? t('chat.toolNoOutput') : t('chat.toolFailed');
             // Tools stay collapsed by default; result visible when expanded.
             entry.content.createDiv({ cls: 'dsh-tool-line', text: lineText });
             // Collect for history
@@ -548,10 +548,10 @@ export class ChatView extends ItemView {
   private buildMemorySummary(): string[] {
     if (this.memory.length === 0) return [];
     const recent = this.memory.slice(-5);
-    const lines = ['[对话记忆]'];
+    const lines = [t('chat.memoryHeader')];
     for (const turn of recent) {
-      lines.push(`- 用户: ${turn.user.slice(0, 80)}`);
-      if (turn.assistant) lines.push(`  助手: ${turn.assistant.slice(0, 80)}`);
+      lines.push(`- ${t('chat.memoryUser')}${turn.user.slice(0, 80)}`);
+      if (turn.assistant) lines.push(`  ${t('chat.memoryAssistant')}${turn.assistant.slice(0, 80)}`);
     }
     return [lines.join('\n')];
   }
@@ -680,7 +680,7 @@ export class ChatView extends ItemView {
     const toggle = block.createEl('button', { cls: 'dsh-think-toggle' });
     const chevron = toggle.createSpan({ cls: 'dsh-think-chevron' });
     setIcon(chevron, 'chevron-right');
-    toggle.createSpan({ text: '思考过程' });
+    toggle.createSpan({ text: t('chat.thinkToggle') });
     const body = block.createDiv({ cls: 'dsh-think-body hidden' });
     body.setText(thinking);
     toggle.onclick = () => {
@@ -715,7 +715,7 @@ export class ChatView extends ItemView {
       if (tool.args) content.createDiv({ cls: 'dsh-tool-cmd', text: tool.args });
       const lineText = tool.summary
         ? tool.summary
-        : tool.ok ? '(执行完成,无输出)' : '(执行失败)';
+        : tool.ok ? t('chat.toolNoOutput') : t('chat.toolFailed');
       content.createDiv({ cls: 'dsh-tool-line', text: lineText });
       header.onclick = () => {
         const collapsed = content.hasClass('hidden');
@@ -868,7 +868,7 @@ export class ChatView extends ItemView {
   private async resumeSession(s: import('./history').SessionRecord): Promise<void> {
     const activated = await this.plugin.history?.activateSession(s.id);
     if (!activated) {
-      new Notice('恢复会话失败');
+      new Notice(t('chat.resumeFail'));
       return;
     }
     // Rebuild context memory from the most recent turns (used for refill).
@@ -884,7 +884,7 @@ export class ChatView extends ItemView {
     }
     this.contextMeter?.reset();
     this.scrollToBottom();
-    new Notice(`已恢复会话:${activated.title}`);
+    new Notice(t('chat.resumed', { title: activated.title }));
   }
 
   // ── History panel (floating, anchored to the toolbar icon) ─────────
@@ -905,7 +905,7 @@ export class ChatView extends ItemView {
 
     const sessions = this.plugin.history?.getSessions() ?? [];
     if (sessions.length === 0) {
-      panel.createDiv({ cls: 'dsh-history-empty', text: '暂无会话' });
+      panel.createDiv({ cls: 'dsh-history-empty', text: t('chat.historyEmpty') });
     } else {
       for (const s of sessions) {
         const item = panel.createDiv({
@@ -920,7 +920,7 @@ export class ChatView extends ItemView {
 
         const renameBtn = row1.createEl('button', { cls: 'dsh-history-act' });
         setIcon(renameBtn, 'pencil');
-        renameBtn.setAttribute('aria-label', '重命名');
+        renameBtn.setAttribute('aria-label', t('chat.rename'));
         renameBtn.onclick = (e) => {
           e.stopPropagation();
           this.renameInPanel(item, title, s);
@@ -928,7 +928,7 @@ export class ChatView extends ItemView {
 
         const pinBtn = row1.createEl('button', { cls: `dsh-history-act${s.pinned ? ' is-active' : ''}` });
         setIcon(pinBtn, 'pin');
-        pinBtn.setAttribute('aria-label', s.pinned ? '取消固定' : '固定到顶部');
+        pinBtn.setAttribute('aria-label', s.pinned ? t('chat.unpin') : t('chat.pin'));
         pinBtn.onclick = (e) => {
           e.stopPropagation();
           void this.plugin.history?.togglePin(s.id).then(() => this.openHistoryPanel());
@@ -936,7 +936,7 @@ export class ChatView extends ItemView {
 
         const delBtn = row1.createEl('button', { cls: 'dsh-history-act' });
         setIcon(delBtn, 'x');
-        delBtn.setAttribute('aria-label', '删除会话');
+        delBtn.setAttribute('aria-label', t('chat.deleteSession'));
         delBtn.onclick = (e) => {
           e.stopPropagation();
           void this.plugin.history?.removeSession(s.id).then(() => this.openHistoryPanel());
@@ -945,7 +945,7 @@ export class ChatView extends ItemView {
         // Row 2: date + editable note
         const row2 = item.createDiv({ cls: 'dsh-history-row2' });
         row2.createSpan({ cls: 'dsh-history-date', text: new Date(s.endedAt).toLocaleString() });
-        const note = row2.createSpan({ cls: 'dsh-history-note', text: s.note || '添加备注…' });
+        const note = row2.createSpan({ cls: 'dsh-history-note', text: s.note || t('chat.addNote') });
         note.onclick = (e) => {
           e.stopPropagation();
           this.editNoteInPanel(note, s);
@@ -996,7 +996,7 @@ export class ChatView extends ItemView {
   private editNoteInPanel(noteEl: HTMLElement, s: import('./history').SessionRecord): void {
     const input = createEl('input', { cls: 'dsh-history-note-input' });
     input.value = s.note || '';
-    input.placeholder = '添加备注…';
+    input.placeholder = t('chat.addNote');
     noteEl.replaceWith(input);
     input.focus();
     const commit = (): void => {

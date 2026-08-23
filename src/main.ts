@@ -4,7 +4,7 @@ import { ChatView, VIEW_TYPE_CHAT } from './chat-view';
 import { SecurityConfirmModal } from './modals';
 import { DshClient } from './dsh-client';
 import { HistoryStore } from './history';
-import { setLocale, resolveLocale } from './i18n';
+import { setLocale, resolveLocale, t } from './i18n';
 
 export default class DshPlugin extends Plugin {
   settings!: DshSettings;
@@ -27,14 +27,14 @@ export default class DshPlugin extends Plugin {
     this.registerView(VIEW_TYPE_CHAT, (leaf: WorkspaceLeaf) => new ChatView(leaf, this));
 
     // Ribbon icon
-    this.addRibbonIcon('bot', 'Deep harness', () => {
+    this.addRibbonIcon('bot', 'DeepHarness', () => {
       void this.activateChatView();
     });
 
     // Command: open chat
     this.addCommand({
       id: 'open-harness-chat',
-      name: '打开聊天面板',
+      name: t('chat.openChat'),
       callback: () => {
         void this.activateChatView();
       },
@@ -43,7 +43,7 @@ export default class DshPlugin extends Plugin {
     // Command: ask about the active note
     this.addCommand({
       id: 'ask-active-note',
-      name: '处理当前笔记',
+      name: t('chat.processNote'),
       checkCallback: (checking: boolean) => {
         const file = this.app.workspace.getActiveFile();
         if (file?.extension === 'md') {
@@ -125,14 +125,16 @@ export default class DshPlugin extends Plugin {
     const file = this.app.workspace.getActiveFile();
     if (!file) return;
     const content = await this.app.vault.cachedRead(file);
-    const prompt =
-      `请分析当前笔记并给出建议。\n\nTITLE: ${file.basename}\n\nCONTENT:\n${content.slice(0, 20000)}`;
+    const prompt = t('chat.askNotePrompt', {
+      title: file.basename,
+      content: content.slice(0, 20000),
+    });
     await this.activateChatView();
     const view = this.getChatView();
     if (view) {
       view.setPendingInput(prompt);
     } else {
-      new Notice('无法打开聊天视图');
+      new Notice(t('chat.noChatView'));
     }
   }
 
