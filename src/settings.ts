@@ -32,6 +32,8 @@ export interface DshSettings {
   extraSkillDirs: string;
   /** Plugin-only DeepSeek API key; empty = reuse the desktop DSH credentials. */
   apiKey: string;
+  /** Model API backend used by the plugin's isolated DSH_HOME. */
+  provider: 'deepseek-official' | 'opencode-go';
 }
 
 export const DEFAULT_SETTINGS: DshSettings = {
@@ -53,7 +55,13 @@ export const DEFAULT_SETTINGS: DshSettings = {
   obsidianSkill: true,
   extraSkillDirs: 'Library/Skills, .claude/skills',
   apiKey: '',
+  provider: 'deepseek-official',
 };
+
+export const PROVIDER_OPTIONS = [
+  { id: 'deepseek-official', label: 'DeepSeek 官方 API' },
+  { id: 'opencode-go', label: 'OpenCode Go' },
+] as const;
 
 export const MODEL_OPTIONS = [
   { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
@@ -152,6 +160,16 @@ export class DshSettingTab extends PluginSettingTab {
                 });
               text.inputEl.type = 'password';
               text.inputEl.autocomplete = 'off';
+            });
+          }),
+
+          render(t('settings.provider.name'), t('settings.provider.desc'), (setting) => {
+            setting.addDropdown((dd) => {
+              for (const p of PROVIDER_OPTIONS) dd.addOption(p.id, p.label);
+              dd.setValue(s.provider).onChange(async (value) => {
+                s.provider = value as DshSettings['provider'];
+                await this.plugin.saveSettings();
+              });
             });
           }),
 

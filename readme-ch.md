@@ -195,6 +195,7 @@ Copy-Item dist\main.js, dist\manifest.json, dist\styles.css "$V\.obsidian\plugin
 | Node.js 路径 | 自动探测 | 插件用 node 直接运行 dsh 脚本，绕过 Obsidian 受限 PATH 的 shebang 问题 |
 | DSH_HOME | `~/.dsh` | 凭据 / 配置根 |
 | 插件专属 API Key | 空 | 仅供插件使用的 DeepSeek API Key（与桌面端分离）；留空 = 复用桌面端凭据 |
+| 模型提供方 | DeepSeek 官方 API | deepseek-official = DeepSeek 官方接口；opencode-go = OpenCode Go 订阅（OpenAI 兼容，接口 https://opencode.ai/zen/go/v1） |
 | 工作目录 | vault 根 | 可填相对子目录限定 agent 范围；越界路径会安全回退到 vault 根 |
 | 任务超时 | 600s | 超时自动停止 |
 | 对话记忆 | 开 | 上下文回填 |

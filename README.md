@@ -87,6 +87,7 @@ After enabling the plugin, click the bot icon in the left ribbon to open the cha
 | Node.js path | auto-detect | The plugin runs the dsh script with node directly (bypasses the shebang issue under Obsidian's restricted PATH) |
 | DSH_HOME | `~/.dsh` | Credentials/config root |
 | Plugin API key | empty | DeepSeek API key used ONLY by this plugin (separate from the desktop app); empty = reuse desktop credentials |
+| Model provider | DeepSeek official API | deepseek-official = DeepSeek official API; opencode-go = OpenCode Go subscription (OpenAI-compatible, https://opencode.ai/zen/go/v1) |
 | Working directory | vault root | Relative subfolder to scope the agent |
 | Task timeout | 600s | Auto-stops the run when exceeded |
 | Conversation memory | on | Context refill |

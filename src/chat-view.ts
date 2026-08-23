@@ -477,6 +477,7 @@ export class ChatView extends ItemView {
         cwd: this.runner.workdir(vaultRoot),
         dshHome,
         apiKey: this.plugin.settings.apiKey.trim() || undefined,
+        provider: this.plugin.settings.provider,
         toolsMode: this.plugin.settings.toolExecutionMode,
         permissionMode: this.plugin.settings.permissionMode,
         patchPath: patchPaths,

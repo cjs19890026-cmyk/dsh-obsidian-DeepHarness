@@ -66,6 +66,53 @@ const PERSONA_VERSION = 4;
 const PERSONA_MARKER = `# deepharness-persona-v${PERSONA_VERSION}`;
 
 /**
+ * Fallback definition of the OpenCode Go provider, used when the user's real
+ * DSH_HOME does not declare `llm-pi-ai.providers.opencode-go`. Mirrors the
+ * config shipped in the official ~/.dsh/settings.yaml defaults.
+ */
+const OPENCODE_GO_PROVIDER_FALLBACK = [
+  'llm-pi-ai:',
+  '  providers:',
+  '    opencode-go:',
+  '      displayName: OpenCode Go',
+  '      apiKeyEnv: OPENCODE_GO_API_KEY',
+  '      api: openai-completions',
+  '      baseURL: https://opencode.ai/zen/go/v1',
+  '      compat:',
+  '        thinkingFormat: deepseek',
+  '        supportsDeveloperRole: false',
+  '        maxTokensField: max_tokens',
+  '      models:',
+  '        - id: deepseek-v4-flash',
+  '          name: DeepSeek V4 Flash',
+  '          contextWindow: 131072',
+  '        - id: deepseek-v4-pro',
+  '          name: DeepSeek V4 Pro',
+  '          contextWindow: 131072',
+];
+
+/** Extract a top-level YAML block (e.g. `llm-pi-ai:`) from a settings file. */
+function extractTopLevelBlock(text: string, key: string): string | null {
+  const lines = text.split(/\r?\n/);
+  let start = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trimStart() === line && line.startsWith(`${key}:`)) {
+      start = i;
+      break;
+    }
+  }
+  if (start === -1) return null;
+  const block = [lines[start]];
+  for (let i = start + 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trimStart() === line && /^[A-Za-z0-9_.-]+:/.test(line)) break;
+    block.push(line);
+  }
+  return block.join('\n');
+}
+
+/**
  * Source of the stream-relay DSH plugin injected via --patch.
  * It listens on the live `session/event` stream and emits real-time
  * JSON Lines (`DLEVENT\t<json>`) for reasoning blocks and tool calls:
@@ -349,16 +396,36 @@ export class DshRunner {
           fs.copyFileSync(credSrc, credDst);
         }
       }
-      // The deepseek provider consumes `agent-default-model` settings
-      // section (provider/model) plus its reasoningEffort.
-      const settings = [
+      // The selected provider consumes `agent-default-model` (provider/model)
+      // plus its reasoningEffort. Custom providers (e.g. OpenCode Go) also
+      // need their `llm-pi-ai.providers.*` definition, which we inherit from
+      // the user's real DSH_HOME settings when available.
+      const provider = this.settings.provider || 'deepseek-official';
+      const settingsLines: string[] = [];
+      if (provider === 'opencode-go') {
+        const src = path.join(this.dshHome(), 'settings.yaml');
+        let block: string | null = null;
+        try {
+          if (fs.existsSync(src)) {
+            block = extractTopLevelBlock(fs.readFileSync(src, 'utf8'), 'llm-pi-ai');
+          }
+        } catch {
+          block = null;
+        }
+        if (block) {
+          settingsLines.push(block.trimEnd());
+        } else {
+          settingsLines.push(...OPENCODE_GO_PROVIDER_FALLBACK);
+        }
+      }
+      settingsLines.push(
         'agent-default-model:',
-        '  provider: deepseek-official',
+        `  provider: ${provider}`,
         `  model: ${sel.model}`,
         `  reasoningEffort: ${sel.effort}`,
         '',
-      ].join('\n');
-      fs.writeFileSync(path.join(base, 'settings.yaml'), settings, 'utf8');
+      );
+      fs.writeFileSync(path.join(base, 'settings.yaml'), settingsLines.join('\n'), 'utf8');
       return base;
     } catch {
       return null;

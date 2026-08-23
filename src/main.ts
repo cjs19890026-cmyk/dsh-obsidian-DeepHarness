@@ -143,6 +143,13 @@ export default class DshPlugin extends Plugin {
 
   async activateChatView(): Promise<void> {
     const { workspace } = this.app;
+    // The chat view lives in the right sidebar; if that sidebar is collapsed
+    // the leaf is created/focused but invisible. Expanding it here makes the
+    // ribbon icon and "打开聊天面板" command always reveal the panel.
+    const rightSplit = (workspace as { rightSplit?: { collapsed?: boolean; expand?: () => void } }).rightSplit;
+    if (rightSplit && rightSplit.collapsed) {
+      rightSplit.expand?.();
+    }
     let leaf = workspace.getLeavesOfType(VIEW_TYPE_CHAT)[0];
     if (!leaf) {
       leaf = workspace.getRightLeaf(false) as WorkspaceLeaf;
