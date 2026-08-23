@@ -74,16 +74,19 @@ export const REASONING_OPTIONS = [
   { id: 'max', label: 'Max' },
 ] as const;
 
+// Hardcoded English labels, matching the DSH app's security-mode selector
+// (kebab-case → Title Case, with "danger-full-access" shown as "Full access").
+// Kept intentionally outside i18n: they never change with the UI language.
 export const PERMISSION_OPTIONS = [
-  { id: 'read-only', labelKey: 'settings.permission.readOnly' },
-  { id: 'workspace-write', labelKey: 'settings.permission.workspaceWrite' },
-  { id: 'danger-full-access', labelKey: 'settings.permission.fullAccess' },
+  { id: 'read-only', label: 'Read Only' },
+  { id: 'workspace-write', label: 'Workspace Write' },
+  { id: 'danger-full-access', label: 'Full access' },
 ] as const;
 
-/** Localized label for a permission mode id (used in chat + settings). */
+/** Label for a permission mode id (used in chat + settings). Never localized. */
 export function permissionLabel(id: string): string {
   const o = PERMISSION_OPTIONS.find((x) => x.id === id);
-  return o ? t(o.labelKey) : id;
+  return o ? o.label : id;
 }
 
 export class DshSettingTab extends PluginSettingTab {
@@ -118,8 +121,11 @@ export class DshSettingTab extends PluginSettingTab {
               dd.addOption('zh', '中文');
               dd.setValue(s.language).onChange(async (value) => {
                 s.language = value as DshSettings['language'];
-                await this.plugin.saveSettings();
+                // Apply the locale BEFORE persisting: saveSettings() notifies
+                // settings listeners (chat trigger labels), which must render
+                // in the NEW language rather than the old one.
                 this.plugin.applyLocale();
+                await this.plugin.saveSettings();
                 this.update();
               });
             });

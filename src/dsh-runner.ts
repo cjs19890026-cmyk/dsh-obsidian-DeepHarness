@@ -7,6 +7,7 @@ import { versionCmp, streamRelayPatchYaml, shimJsTarget } from './pure';
 import type { DshDiagnostics } from './dsh-client';
 import type { DshSettings } from './settings';
 import { ensureObsidianSkill as writeObsidianSkill, MEMORY_FILE } from './obsidian-skill';
+import { t, getLocale } from './i18n';
 
 const execFileAsync = promisify(execFile);
 
@@ -62,8 +63,7 @@ function windowsNodeCandidates(): string[] {
 }
 
 /** Bump to force regeneration of the generated persona patch (see migration). */
-const PERSONA_VERSION = 4;
-const PERSONA_MARKER = `# deepharness-persona-v${PERSONA_VERSION}`;
+const PERSONA_VERSION = 5;
 
 /**
  * Fallback definition of the OpenCode Go provider, used when the user's real
@@ -572,22 +572,28 @@ export class DshRunner {
       return { persona: null, think: null };
     }
 
-    // 1) Persona patch (user-editable; regenerated only on a version bump)
+    // 1) Persona patch (user-editable; regenerated on a version bump, on a
+    //    UI-language change — the marker embeds the locale — or when a custom
+    //    persona is set but missing from the file. User edits are preserved as
+    //    vault.yml.bak before regeneration.)
     let persona: string | null = null;
     const personaFile = path.join(dir, 'vault.yml');
     try {
+      const marker = this.personaMarker();
       if (!fs.existsSync(personaFile)) {
-        fs.writeFileSync(personaFile, this.renderPersonaYaml(this.buildPersonaLines(), PERSONA_MARKER), 'utf8');
+        fs.writeFileSync(personaFile, this.renderPersonaYaml(this.buildPersonaLines(), marker), 'utf8');
       } else {
         const existing = fs.readFileSync(personaFile, 'utf8');
-        if (!existing.includes(PERSONA_MARKER)) {
-          // Pre-v2 generated file. Preserve any user edits as a .bak, then
-          // regenerate with the current default + custom persona.
+        const custom = this.settings.customPersona.trim();
+        const customMissing = custom !== '' && !existing.includes(custom);
+        if (!existing.includes(marker) || customMissing) {
+          // Stale or locale-mismatched file. Preserve any user edits as a
+          // .bak, then regenerate in the current locale.
           const legacy = this.renderLegacyPersonaYaml();
           if (existing.trim() !== legacy.trim()) {
             try { fs.writeFileSync(`${personaFile}.bak`, existing, 'utf8'); } catch { /* ignore */ }
           }
-          fs.writeFileSync(personaFile, this.renderPersonaYaml(this.buildPersonaLines(), PERSONA_MARKER), 'utf8');
+          fs.writeFileSync(personaFile, this.renderPersonaYaml(this.buildPersonaLines(), marker), 'utf8');
         }
       }
       persona = personaFile;
@@ -613,15 +619,23 @@ export class DshRunner {
     return { persona, think };
   }
 
-  /** Default persona body (v3): Claudian-style Obsidian expert + L1 rules. */
+  /** Marker line embedding the persona version + current UI locale, so a
+   *  language switch in settings regenerates the persona patch in the new
+   *  language (vault.yml.bak preserves any user edits). */
+  private personaMarker(): string {
+    return `# deepharness-persona-v${PERSONA_VERSION}-${getLocale()}`;
+  }
+
+  /** Default persona body: localized Obsidian expert + L1 rules + reply language. */
   private buildPersonaLines(): string[] {
     const lines = [
-      '你是运行在 Obsidian vault 里的专家助手,直接操作用户的 vault(工作目录 {{cwd}},即 vault 或其子目录)。',
-      '破坏性操作(删除/移动/覆盖)前必须先向用户说明并征得同意;编辑任何文件前先读它。',
-      '涉及笔记/frontmatter/wikilink/标签/日记/反链/模板等 vault 操作时,先用 skill 加载 obsidian 技能并遵守其中约定;开始任务前先读 Harness/memory.md 带回长期结论,结束时写回。',
+      t('persona.role'),
+      t('persona.safety'),
+      t('persona.vaultSkill'),
+      t('persona.replyLanguage'),
     ];
     if (this.settings.customPersona.trim()) {
-      lines.push('', '附加用户指令:', this.settings.customPersona.trim());
+      lines.push('', t('persona.customLabel'), this.settings.customPersona.trim());
     }
     return lines;
   }

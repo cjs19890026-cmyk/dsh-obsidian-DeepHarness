@@ -4,13 +4,15 @@ import { ChatView, VIEW_TYPE_CHAT } from './chat-view';
 import { SecurityConfirmModal } from './modals';
 import { DshClient } from './dsh-client';
 import { HistoryStore } from './history';
-import { setLocale, resolveLocale, t } from './i18n';
+import { setLocale, resolveLocale, getLocale, t } from './i18n';
 
 export default class DshPlugin extends Plugin {
   settings!: DshSettings;
   private vaultPatchInvalidated = false;
+  private commandsRegistered = false;
   history: HistoryStore | null = null;
   private settingsChangeListeners = new Set<() => void>();
+  private localeChangeListeners = new Set<() => void>();
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -31,30 +33,8 @@ export default class DshPlugin extends Plugin {
       void this.activateChatView();
     });
 
-    // Command: open chat
-    this.addCommand({
-      id: 'open-harness-chat',
-      name: t('chat.openChat'),
-      callback: () => {
-        void this.activateChatView();
-      },
-    });
-
-    // Command: ask about the active note
-    this.addCommand({
-      id: 'ask-active-note',
-      name: t('chat.processNote'),
-      checkCallback: (checking: boolean) => {
-        const file = this.app.workspace.getActiveFile();
-        if (file?.extension === 'md') {
-          if (!checking) {
-            void this.askWithActiveNote();
-          }
-          return true;
-        }
-        return false;
-      },
-    });
+    // Commands (names are localized; re-registered on language change)
+    this.registerCommands();
 
     this.addSettingTab(new DshSettingTab(this.app, this));
   }
@@ -82,10 +62,61 @@ export default class DshPlugin extends Plugin {
     return this.app.vault.getName() || 'vault';
   }
 
-  /** Re-apply UI language from settings + Obsidian locale. */
+  /** Re-apply UI language from settings + Obsidian locale. Notifies locale
+   *  listeners (chat view re-renders its strings) only when the locale
+   *  actually changed, so open views refresh without being recreated. */
   applyLocale(): void {
     const locale = resolveLocale(obsidianLocale(this.app), this.settings.language);
+    if (locale === getLocale()) return;
     setLocale(locale);
+    // Command-palette names are captured at registration time; re-register so
+    // the palette follows the UI language without a plugin reload.
+    if (this.commandsRegistered) {
+      this.removeCommand('open-harness-chat');
+      this.removeCommand('ask-active-note');
+      this.registerCommands();
+    }
+    this.notifyLocaleChange();
+  }
+
+  /** Register the plugin's commands (localized names). */
+  private registerCommands(): void {
+    this.addCommand({
+      id: 'open-harness-chat',
+      name: t('chat.openChat'),
+      callback: () => {
+        void this.activateChatView();
+      },
+    });
+    this.addCommand({
+      id: 'ask-active-note',
+      name: t('chat.processNote'),
+      checkCallback: (checking: boolean) => {
+        const file = this.app.workspace.getActiveFile();
+        if (file?.extension === 'md') {
+          if (!checking) {
+            void this.askWithActiveNote();
+          }
+          return true;
+        }
+        return false;
+      },
+    });
+    this.commandsRegistered = true;
+  }
+
+  /**
+   * Subscribe to UI-language changes (returns an unsubscribe fn). Views that
+   * render localized strings use this to re-render in place when the user
+   * switches the language in settings — no view teardown / plugin reload needed.
+   */
+  onLocaleChange(listener: () => void): () => void {
+    this.localeChangeListeners.add(listener);
+    return () => this.localeChangeListeners.delete(listener);
+  }
+
+  private notifyLocaleChange(): void {
+    for (const listener of this.localeChangeListeners) listener();
   }
 
   /** Force regeneration of the persona patch (custom persona changed). */

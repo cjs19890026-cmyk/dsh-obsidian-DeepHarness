@@ -60,6 +60,7 @@ export class ChatView extends ItemView {
   private memory: MemoryTurn[] = [];
   private contextMeter: ContextMeter | null = null;
   private settingsUnsub: (() => void) | null = null;
+  private localeUnsub: (() => void) | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: DshPlugin) {
     super(leaf);
@@ -197,6 +198,37 @@ export class ChatView extends ItemView {
     // Reflect settings-tab changes (model / effort / permission) into the
     // trigger labels, which otherwise only refresh from our own menus.
     this.settingsUnsub = this.plugin.onSettingsChange(() => this.updateTriggerLabels());
+    // Reflect language changes into every locale-dependent string in place,
+    // so the panel refreshes without being closed/reopened.
+    this.localeUnsub = this.plugin.onLocaleChange(() => this.refreshLocaleStrings());
+  }
+
+  /** Re-apply locale-dependent strings in place after a language switch:
+   *  toolbar tooltips, composer placeholder, send text, welcome line, trigger
+   *  labels and any open floating panel. Historical messages keep their text. */
+  private refreshLocaleStrings(): void {
+    if (this.clearBtn) this.clearBtn.setAttribute('aria-label', t('chat.clear'));
+    if (this.referenceBtn) {
+      this.referenceBtn.setAttribute('aria-label', t('chat.referenceNote'));
+      this.referenceBtn.setAttribute('title', t('chat.referenceNote'));
+    }
+    if (this.mentionBtn) {
+      this.mentionBtn.setAttribute('aria-label', t('chat.mentionButton'));
+      this.mentionBtn.setAttribute('title', t('chat.mentionButton'));
+    }
+    if (this.skillBtn) {
+      this.skillBtn.setAttribute('aria-label', t('chat.skillButton'));
+      this.skillBtn.setAttribute('title', t('chat.skillButton'));
+    }
+    if (this.historyBtn) this.historyBtn.setAttribute('aria-label', t('chat.historyButton'));
+    this.editor.el.setAttribute('data-placeholder', t('chat.placeholder'));
+    if (this.sendButton) this.sendButton.setText(this.running ? t('chat.stop') : t('chat.send'));
+    const welcomeSub = this.messagesContainer.querySelector('.dsh-welcome-sub');
+    if (welcomeSub) welcomeSub.textContent = t('chat.welcomeSub');
+    this.updateTriggerLabels();
+    // Floating panels carry their own localized labels; rebuild any that is open.
+    if (this.historyPanel) this.openHistoryPanel();
+    if (this.skillPanel) this.openSkillPanel();
   }
 
   /** Refresh trigger button labels from settings. */
@@ -275,6 +307,8 @@ export class ChatView extends ItemView {
     if (this.statusTimer !== null) window.clearInterval(this.statusTimer);
     this.settingsUnsub?.();
     this.settingsUnsub = null;
+    this.localeUnsub?.();
+    this.localeUnsub = null;
     return Promise.resolve();
   }
 
