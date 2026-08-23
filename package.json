@@ -1,6 +1,6 @@
 {
   "name": "deepharness",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Obsidian plugin that calls DeepSeek Harness (dsh --profile headless) directly from the vault.",
   "type": "module",
   "main": "main.js",

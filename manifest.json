@@ -1,7 +1,7 @@
 {
   "id": "deepharness",
   "name": "DeepHarness",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "minAppVersion": "1.13.0",
   "description": "Chat with a DeepSeek Harness agent inside your vault: it runs bash, edits files, and searches the web to work on your notes.",
   "author": "cjs19890026-cmyk",
