@@ -18,6 +18,27 @@
 
 ## 当前交接重点：第一/二阶段已完成，下面为剩余任务
 
+### 最近交接摘要（子进程 env 白名单，2026-09-03，未提交）
+- 已完成：**子进程环境变量白名单**（P2-C / 剩余任务“下一批低风险代码修复”第 2 条）。
+- 改动文件：
+  - src/dsh-client.ts：新增导出 DSH_ENV_ALLOWLIST（继承白名单）+ buildDshEnv(opts, sourceEnv)（分层：白名单继承 → opts.env 显式注入 → 插件注入项 DSH_HOME / API key / DSH_TOOLS_MODE / DSH_PERMISSION_MODE → nodeBin 目录前置 PATH）。DshClient.run 不再把整个 process.env 传给 dsh 子进程，只构造白名单 + 注入项；顺带修正了 spawnFn / startedAt 的缩进。
+  - src/dsh-client.test.ts：+8 测试 = buildDshEnv 纯函数 7 条（白名单继承 / 空 env / opts.env 合并 / 默认 provider 的 DEEPSEEK_API_KEY / 插件项覆盖 / 带 source PATH 的 nodeBin PATH 前置 / 无 source PATH 时的 fallback）+ fake spawn env 隔离 1 条（断言 spawn env 只含白名单 ∪ 插件注入项，不泄漏非白名单 process.env 键）。
+- 验证基线：npm test = 108 passed / 2 skipped（原 100 + 8），npx tsc --noEmit、npm run build、npx eslint src/*.ts（0 errors）全部通过。
+- 尚未提交/推送，等用户确认。
+- 无 i18n 文案、无 DLEVENT / 生成路径 / dsh-home 约定改动；未拆 chat-view.ts / dsh-runner.ts。
+
+### 最近交接摘要（2026-09-03 已推送）
+- 已完成并推送：`0427336 feat(dsh-client): inject spawn/timer dependencies and add fake spawn tests`
+- 该提交包含：
+  - `DshClient` 依赖注入 `spawn` / `setTimeout` / `clearTimeout`
+  - fake spawn / fake timer 测试
+  - 移除测试中的 `window` shim
+  - 设置页环境检查缩进/空行清理
+  - i18n 新 key 缩进对齐
+- 下一个建议任务：**子进程环境变量白名单**（不再把整个 `process.env` 传给 dsh 子进程，只保留必要项和插件注入项；补 env 测试）
+- 当前验证基线：`npm test` = 100 passed / 2 skipped，`tsc`、`build`、`eslint 0 errors` 通过。
+
+
 ### 已完成（下一轮不需要再做）
 
 - [x] 5.1 `package-lock.json` 与 `package.json` / `manifest.json` 版本同步为 `0.1.6`
@@ -39,8 +60,8 @@
 - [ ] release 流程校验 tag 与 `manifest.json` 版本一致（防发错版本）
 
 #### 2. 下一批低风险代码修复（小步做，每步跑 npm test / tsc / build）
-- [x] `DshClient` 依赖注入 `spawn` / `setTimeout` / `clearTimeout`，替代当前测试里的 `window` shim，并补 fake spawn 参数/env/error 测试
-- [ ] 子进程环境变量白名单：不再把整个 `process.env` 传给 dsh 子进程，只保留必要项和插件注入项
+- [x] `DshClient` 依赖注入 `spawn` / `setTimeout` / `clearTimeout`，替代当前测试里的 `window` shim，并补 fake spawn 参数/env/error 测试（提交 hash：`0427336`）
+- [x] 子进程环境变量白名单：不再把整个 `process.env` 传给 dsh 子进程，只保留必要项和插件注入项（本次完成：`DSH_ENV_ALLOWLIST` + `buildDshEnv`；未提交）
 - [ ] P2-D：设置页补 API Key 明文存储风险提示；如可行再评估 keychain
 - [ ] 生成文件原子写：`ensurePluginDshHome` / `ensureVaultPatch` / `ensureSkillDirsPatch` 改为 tmp + rename，参考 `HistoryStore.save`
 - [ ] `HistoryStore.titleFromTurn` 默认标题走 `t('chat.newSession')`，去掉硬编码中文 `'新会话'`
@@ -64,15 +85,17 @@
 ## 执行环境备注（保留）
 
 - 分支与 git：
-  - 当前分支 `dsh-obsidian-deepharness-new-architecture` 仍为本地分支，未 push。
-  - 若需要合并主线 / PR / push，由用户决定；本 HANDOFF 刻意不提交。
+  - 当前分支 `dsh-obsidian-deepharness-new-architecture` 已推送到远程同名分支。
+  - 最近提交：`0427336 feat(dsh-client): inject spawn/timer dependencies and add fake spawn tests`
+  - 若需要合并主线 / PR / push，由用户决定。
 - 本地验证：
   - `npm test`、`npx tsc --noEmit`、`npm run build` 应全部通过。
   - 本机 `~/.npm` 可能有 root 属主问题，可用 `npm ci --cache "$(pwd)/.npm-cache"`。
 - 本机 git 代理可能不在线；推送需 `git -c http.proxy= -c https.proxy= push …`。
 - Obsidian 设置页使用 1.13 声明式新 API，不要改回 `display()`。
 - 测试中 `obsidian` 包 main 为空，需 `vi.mock('obsidian', …)`。
-- 当前 `DshClient` 测试用 `globalThis.window` shim；生产代码尚未改依赖注入，下一批按上文剩余任务处理。
+- 当前 `DshClient` 已支持注入 `spawn` / `setTimeout` / `clearTimeout`；测试不再依赖 `window` shim。
+- `dist/` 被 `.gitignore` 忽略，不在源码仓库中提交；CI/Release 会自行构建。
 - 真实 vault 已部署到 `Knowledge_Inbox1/.obsidian/plugins/deepharness/`；后续 UI 改动后需重新构建覆盖安装。
 
 ---
@@ -350,7 +373,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 ### 第三阶段及以后（结构拆分 / 剩余项；部分已完成）
 
 - [x] 抽取 `parseDshEventLine` 纯函数并单测 —— 已完成（`src/pure.ts` + `src/pure.test.ts`）
-- [x] `DshClient` 依赖注入 `spawn` / timer —— 已完成（`src/dsh-client.ts` + `src/dsh-client.test.ts`）
+- [x] `DshClient` 依赖注入 `spawn` / timer —— 已完成（`src/dsh-client.ts` + `src/dsh-client.test.ts`，提交 hash：`0427336`）
 - [ ] 引入 `RunController` 状态机
 - [ ] 拆分 `DshRunner`（`DshResolver` / `DshHomePreparer` / `VaultPatchWriter` / `SkillMemorySeeder` / `TaskBuilder`）
 - [ ] 拆分 `ChatView`（`HistoryPanel` / `SkillPanel` / `MessageListRenderer` / `ComposerController`）
@@ -397,8 +420,8 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 
 ### 剩余验收（按上一节剩余任务逐项完成）
 1. `package.json` 固定 `obsidian` 版本并同步 lockfile。
-2. [x] `DshClient` 可注入 `spawn` / timer，测试不再依赖 `window` shim。
-3. 子进程 env 白名单化。
+2. [x] `DshClient` 可注入 `spawn` / timer，测试不再依赖 `window` shim。（提交 hash：`0427336`）
+3. [x] 子进程 env 白名单化（`src/dsh-client.ts` 的 `DSH_ENV_ALLOWLIST` + `buildDshEnv`，+8 测试）。
 4. API Key 存储风险有提示或方案（P2-D）。
 5. 生成文件统一原子写。
 6. `HistoryStore` 默认标题走 i18n。
@@ -416,7 +439,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 | --- | --- |
 | `src/chat-view.ts` | 仍是大文件；已使用 `parseDshEventLine`；后续才拆结构 |
 | `src/dsh-runner.ts` | 仍是大文件；已加入 `resolveVaultRelativeDir`、opencode fallback；后续才拆结构 |
-| `src/dsh-client.ts` | `killReason` 与依赖注入已完成；剩余 env 白名单 |
+| `src/dsh-client.ts` | `killReason`、依赖注入、子进程 env 白名单（`DSH_ENV_ALLOWLIST` + `buildDshEnv` + `opts.env`）均已完成 |
 | `src/pure.ts` | 已有 `parseDshEventLine`、`resolveVaultRelativeDir` 等纯函数 |
 | `src/settings.ts` | 已增加可写性诊断与文件夹选择器；剩余 string→union 收紧 |
 | `src/history.ts` | 已有原子写与基础测试；剩余默认标题 i18n |
@@ -424,7 +447,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 | `package-lock.json` | 已同步为 `0.1.6` |
 | `.github/workflows/release.yml` | 已使用 Node 22 + `npm ci` + test + build；可再升级 actions 到 v4 |
 | `.github/workflows/ci.yml` | 已新增普通分支 test + build |
-| `src/dsh-client.test.ts` | killReason + fake spawn/timer 测试已完成，不再依赖 `window` shim |
+| `src/dsh-client.test.ts` | killReason + fake spawn/timer + env 白名单（buildDshEnv 纯函数 + fake spawn env 隔离）测试已完成，不再依赖 `window` shim |
 | `src/dsh-runner.test.ts` / `history.test.ts` / `provider-fallback.test.ts` / `pure.test.ts` | 保护测试已完成 |
 
 ---
@@ -438,3 +461,47 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 5. **桌面端 Electron 主进程**：可用 Node 内置模块，但不要引入浏览器专用 API（测试环境也要避免直接 `window`）。
 6. **每个 phase 独立可合入**：避免一次性大爆炸式重构。
 7. **改完跑完整测试和构建**：`npm test` 和 `npm run build` 都要通过。
+
+
+---
+
+## 10. 给下一个 Agent 的提示词模板
+
+> 把下面这段发给下一个写代码的 agent：
+
+"""
+请继续维护 Obsidian 插件 DeepHarness（版本 0.1.6）。
+
+项目路径：
+/Users/mymac/deepseek workplace/dsh-obsidian-deepharness-new-architecture
+
+先阅读：
+1. HANDOFF.md（本文档，重点看顶部“最近交接摘要”和剩余任务）
+2. AI_CONTEXT.md（稳定项目上下文）
+3. 如本地有 MAINTENANCE.md，再看其顶部维护摘要
+
+当前分支已推送到远程：dsh-obsidian-deepharness-new-architecture
+最近提交：0427336
+
+本次建议只做下一步低风险任务：
+【子进程环境变量白名单】
+- 目标：DshClient 不再把整个 process.env 传给 dsh 子进程，只保留必要项和插件显式注入项。
+- 需要同步补 fake spawn 测试，断言传给 spawn 的 env 只包含白名单变量 + DSH_HOME / API key / DSH_TOOLS_MODE / DSH_PERMISSION_MODE / PATH 修正等必需注入项。
+- 不要拆 chat-view.ts / dsh-runner.ts 的大结构。
+- 不要改 DLEVENT 线协议。
+- 不要改生成文件路径和 dsh-home 相关约定。
+- 新增用户可见文案必须走 t()，en/zh 必须成对添加。
+
+每完成一小步必须跑：
+- npm test
+- npx tsc --noEmit
+- npm run build
+- npx eslint src/*.ts
+当前基线：100 passed / 2 skipped，eslint 0 errors。
+
+本机注意：
+- npm ci 若 EPERM，用：npm ci --cache "$(pwd)/.npm-cache"
+- git push 需绕代理：git -c http.proxy= -c https.proxy= push …
+- Obsidian 设置页是声明式 API：不要改回 display()。
+- 不要自行提交/推送，先让用户确认。
+"""

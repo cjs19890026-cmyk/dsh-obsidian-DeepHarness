@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { EventEmitter } from 'events';
-import { DshClient } from './dsh-client';
+import { DshClient, buildDshEnv, DSH_ENV_ALLOWLIST } from './dsh-client';
 
 /**
  * killReason tests: the real DshClient can spawn a short-lived node child that
@@ -256,6 +256,155 @@ describe('DshClient injected dependencies', () => {
       expect(result.killed).toBe(true);
       expect(fake.children[0].kill).toHaveBeenCalledWith('SIGTERM');
     } finally {
+      client.dispose();
+    }
+  });
+});
+
+describe('buildDshEnv (env whitelist)', () => {
+  it('inherits only allowlisted keys from the source environment', () => {
+    const source: Record<string, string | undefined> = {
+      PATH: '/usr/bin:/bin',
+      HOME: '/home/user',
+      USER: 'user',
+      DEEPSEEK_API_KEY: 'sk-must-not-leak',
+      AWS_SECRET_ACCESS_KEY: 'shh',
+      MY_APP_TOKEN: 'nope',
+    };
+    const env = buildDshEnv({ dshBin: '/fake/dsh', cwd: '/tmp/vault' }, source);
+    expect(env).toEqual({
+      PATH: '/usr/bin:/bin',
+      HOME: '/home/user',
+      USER: 'user',
+    });
+  });
+
+  it('keeps the child env minimal when nothing is configured', () => {
+    const env = buildDshEnv({ dshBin: '/fake/dsh', cwd: '/tmp/vault' }, {});
+    expect(Object.keys(env)).toHaveLength(0);
+  });
+
+  it('merges opts.env entries (explicit plugin opt-in) over the allowlist', () => {
+    const env = buildDshEnv(
+      {
+        dshBin: '/fake/dsh',
+        cwd: '/tmp/vault',
+        env: { MY_FEATURE_FLAG: '1', PATH: '/opt/custom/bin:/usr/bin' },
+      },
+      { PATH: '/usr/bin:/bin', HOME: '/home/user' },
+    );
+    expect(env.MY_FEATURE_FLAG).toBe('1');
+    expect(env.PATH).toBe('/opt/custom/bin:/usr/bin'); // opts.env beats inheritance
+    expect(env.HOME).toBe('/home/user'); // inherited key kept
+  });
+
+  it('injects the API key as DEEPSEEK_API_KEY for the default provider', () => {
+    const env = buildDshEnv(
+      { dshBin: '/fake/dsh', cwd: '/tmp/vault', apiKey: 'sk-1' },
+      {},
+    );
+    expect(env.DEEPSEEK_API_KEY).toBe('sk-1');
+    expect(env.OPENCODE_GO_API_KEY).toBeUndefined();
+  });
+
+  it('injects plugin-owned vars and lets them win over opts.env', () => {
+    const env = buildDshEnv(
+      {
+        dshBin: '/fake/dsh',
+        cwd: '/tmp/vault',
+        dshHome: '/tmp/dsh-home',
+        apiKey: 'sk-abc',
+        provider: 'opencode-go',
+        toolsMode: 'both',
+        permissionMode: 'workspace-write',
+        env: {
+          DSH_HOME: '/tmp/wrong',
+          OPENCODE_GO_API_KEY: 'wrong-key',
+          DSH_TOOLS_MODE: 'native',
+        },
+      },
+      {},
+    );
+    expect(env.DSH_HOME).toBe('/tmp/dsh-home');
+    expect(env.OPENCODE_GO_API_KEY).toBe('sk-abc');
+    expect(env.DSH_TOOLS_MODE).toBe('both');
+    expect(env.DSH_PERMISSION_MODE).toBe('workspace-write');
+  });
+
+  it('prepends the node dir to PATH when spawning node directly', () => {
+    const env = buildDshEnv(
+      {
+        dshBin: '/fake/dsh',
+        nodeBin: '/opt/node/bin/node',
+        dshScript: '/fake/dsh/bin.js',
+        cwd: '/tmp/vault',
+      },
+      { PATH: '/usr/bin:/bin' },
+    );
+    expect(env.PATH).toBe(`/opt/node/bin${path.delimiter}/usr/bin:/bin`);
+  });
+
+  it('falls back to a sane PATH when the source has none', () => {
+    const sep = path.delimiter;
+    const fallback = process.platform === 'win32'
+      ? 'C:\\Windows\\System32;C:\\Windows'
+      : '/usr/bin:/bin';
+    const env = buildDshEnv(
+      {
+        dshBin: '/fake/dsh',
+        nodeBin: '/opt/node/bin/node',
+        cwd: '/tmp/vault',
+      },
+      { HOME: '/home/user' },
+    );
+    expect(env.PATH).toBe(`/opt/node/bin${sep}${fallback}`);
+    expect(env.HOME).toBe('/home/user');
+  });
+});
+
+describe('DshClient env isolation', () => {
+  it('never forwards non-allowlisted process.env keys to the child', async () => {
+    const leakKey = '__DSH_ENV_LEAK_GUARD__';
+    const before = process.env[leakKey];
+    process.env[leakKey] = 'super-secret';
+    const fake = {
+      ...createFakeSpawn(),
+      ...createFakeTimers(),
+    };
+    const client = fakeClient(fake);
+    try {
+      const pending = client.run('ignored', {
+        dshBin: '/fake/dsh',
+        cwd: '/tmp/vault',
+        dshHome: '/tmp/dsh-home',
+        apiKey: 'sk-1',
+        toolsMode: 'code',
+        permissionMode: 'workspace-write',
+      });
+
+      const [, , spawnOpts] = fake.spawn.mock.calls[0] as [
+        string,
+        string[],
+        { env: Record<string, string> },
+      ];
+      const pluginOwned = [
+        'DSH_HOME',
+        'DEEPSEEK_API_KEY',
+        'DSH_TOOLS_MODE',
+        'DSH_PERMISSION_MODE',
+      ];
+      for (const key of Object.keys(spawnOpts.env)) {
+        expect(DSH_ENV_ALLOWLIST.has(key) || pluginOwned.includes(key)).toBe(true);
+      }
+      expect(spawnOpts.env[leakKey]).toBeUndefined();
+      expect(spawnOpts.env.DSH_HOME).toBe('/tmp/dsh-home');
+      expect(spawnOpts.env.DEEPSEEK_API_KEY).toBe('sk-1');
+
+      fake.children[0].emit('close', 0);
+      await pending;
+    } finally {
+      if (before === undefined) delete process.env[leakKey];
+      else process.env[leakKey] = before;
       client.dispose();
     }
   });
