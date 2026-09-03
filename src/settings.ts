@@ -387,34 +387,29 @@ export class DshSettingTab extends PluginSettingTab {
                   const nodeLine = setting.settingEl.createEl('p', { cls: 'dsh-check-fail' });
                   nodeLine.setText(t('settings.checkNoNode'));
                 }
-                    // on click: check writable plugin paths
-
-
-                    const vaultRoot = this.plugin.getVaultRoot();
-                    const configDir = this.plugin.app.vault.configDir;
-                    const generatedDir = path.join(vaultRoot, configDir, 'plugins', 'deepharness', 'generated');
-                    const pluginHomeDir = path.join(vaultRoot, configDir, 'plugins', 'deepharness', 'dsh-home');
-                    const settingsYaml = path.join(pluginHomeDir, 'settings.yaml');
-                    const writeChecks: Array<{ path: string; isFile: boolean; label: string }> = [
-                      { path: generatedDir, isFile: false, label: t('settings.check.generatedDir') },
-                      { path: pluginHomeDir, isFile: false, label: t('settings.check.dshHomeDir') },
-                      { path: settingsYaml, isFile: true, label: t('settings.check.settingsYaml') },
-                    ];
-                    for (const check of writeChecks) {
-                      const error = check.isFile ? checkWritableFile(check.path) : checkWritableDir(check.path);
-                      const checkLine = setting.settingEl.createEl('p', {
-                        cls: error ? 'dsh-check-fail' : 'dsh-check-ok',
-                      });
-                      const display = `${check.path} (${check.label})`;
-                      checkLine.setText(error
-                        ? t('settings.check.writableFail', { path: display, message: error })
-                        : t('settings.check.writableOk', { path: display }));
-                    }
+                  // on click: check writable plugin paths
+                  const vaultRoot = this.plugin.getVaultRoot();
+                  const configDir = this.plugin.app.vault.configDir;
+                  const generatedDir = path.join(vaultRoot, configDir, 'plugins', 'deepharness', 'generated');
+                  const pluginHomeDir = path.join(vaultRoot, configDir, 'plugins', 'deepharness', 'dsh-home');
+                  const settingsYaml = path.join(pluginHomeDir, 'settings.yaml');
+                  const writeChecks: Array<{ path: string; isFile: boolean; label: string }> = [
+                    { path: generatedDir, isFile: false, label: t('settings.check.generatedDir') },
+                    { path: pluginHomeDir, isFile: false, label: t('settings.check.dshHomeDir') },
+                    { path: settingsYaml, isFile: true, label: t('settings.check.settingsYaml') },
+                  ];
+                  for (const check of writeChecks) {
+                    const error = check.isFile ? checkWritableFile(check.path) : checkWritableDir(check.path);
+                    const checkLine = setting.settingEl.createEl('p', {
+                      cls: error ? 'dsh-check-fail' : 'dsh-check-ok',
+                    });
+                    const display = `${check.path} (${check.label})`;
+                    checkLine.setText(error
+                      ? t('settings.check.writableFail', { path: display, message: error })
+                      : t('settings.check.writableOk', { path: display }));
+                  }
 
               }));
-
-
-
 
           }),
 

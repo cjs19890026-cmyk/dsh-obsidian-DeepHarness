@@ -1,5 +1,18 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn as nodeSpawn, ChildProcess } from 'child_process';
 import * as path from 'path';
+
+/** The child-process spawn function used by DshClient. */
+export type SpawnFn = typeof nodeSpawn;
+
+/** Optional dependencies that make DshClient testable in Node without a window shim. */
+export interface DshClientDeps {
+  /** Replace the real child_process.spawn (used for fake-spawn tests). */
+  spawn?: SpawnFn;
+  /** Replace window/global timers. Defaults to globalThis.setTimeout. */
+  setTimeout?: (handler: () => void, timeout?: number) => unknown;
+  /** Clear a timer returned by the injected setTimeout. */
+  clearTimeout?: (handle: unknown) => void;
+}
 
 /**
  * Thin bridge between the plugin and the DeepSeek Harness CLI.
@@ -73,8 +86,14 @@ export class DshClient {
   /** Every live client, so the plugin can kill all children on unload. */
   private static live = new Set<DshClient>();
   private child: ChildProcess | null = null;
+  private readonly deps: DshClientDeps;
+  private readonly setTimeoutFn: NonNullable<DshClientDeps['setTimeout']>;
+  private readonly clearTimeoutFn: NonNullable<DshClientDeps['clearTimeout']>;
 
-  constructor() {
+  constructor(deps: DshClientDeps = {}) {
+    this.deps = deps;
+    this.setTimeoutFn = deps.setTimeout ?? ((handler: () => void, timeout?: number): unknown => window.setTimeout(handler, timeout));
+    this.clearTimeoutFn = deps.clearTimeout ?? ((handle: unknown): void => window.clearTimeout(handle as number));
     DshClient.live.add(this);
   }
 
@@ -129,7 +148,8 @@ export class DshClient {
           : '/usr/bin:/bin';
         env.PATH = [nodeDir, env.PATH || fallback].join(path.delimiter);
       }
-      const startedAt = Date.now();
+        const spawnFn = this.deps.spawn ?? nodeSpawn;
+        const startedAt = Date.now();
       let stdout = '';
       let stderr = '';
       let killReason: DshRunResult['killReason'] = null;
@@ -149,7 +169,7 @@ export class DshClient {
         });
       };
 
-      const child = spawn(spawnBin, spawnArgs, {
+      const child = spawnFn(spawnBin, spawnArgs, {
         cwd: opts.cwd,
         env,
         shell: false,
@@ -203,8 +223,8 @@ export class DshClient {
 
       // Timeout
       if (opts.timeoutMs && opts.timeoutMs > 0) {
-        const timer = window.setTimeout(() => requestKill('timeout'), opts.timeoutMs);
-        child.on('close', () => window.clearTimeout(timer));
+        const timer = this.setTimeoutFn(() => requestKill('timeout'), opts.timeoutMs);
+        child.on('close', () => this.clearTimeoutFn(timer));
       }
 
       // User cancellation
@@ -260,8 +280,8 @@ export class DshClient {
           kill('SIGKILL');
         }
       };
-      const timer = window.setTimeout(escalate, 3000);
-      child.once('close', () => window.clearTimeout(timer));
+      const timer = this.setTimeoutFn(escalate, 3000);
+      child.once('close', () => this.clearTimeoutFn(timer));
     } catch {
       // Already gone
     }
