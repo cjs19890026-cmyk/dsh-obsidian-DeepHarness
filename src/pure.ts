@@ -59,6 +59,64 @@ export function parseHeadlessOutput(stdout: string): string {
   return answerParts.join('\n').trim();
 }
 
+/**
+ * One real-time event parsed from a `DLEVENT\t<json>` stdout line.
+ * The stream relay emits these for reasoning increments and tool calls.
+ */
+export type DshStreamEvent =
+  | { t: 'think'; text: string }
+  | { t: 'tool'; status: 'start'; id: string; name: string; args: string; argsFull?: string }
+  | { t: 'tool'; status: 'result'; id?: string; ok: boolean; summary?: string };
+
+const DLEVENT_PREFIX = 'DLEVENT\t';
+
+/**
+ * Parse a single raw stream-relay stdout line into a typed DshStreamEvent.
+ *
+ * Non-DLEVENT lines, malformed JSON, and shapes outside the known relay
+ * protocol return null. This is the pure half of the inline parser previously
+ * embedded in ChatView.handleStreamLine; it does not perform any UI work.
+ */
+export function parseDshEventLine(line: string): DshStreamEvent | null {
+  if (!line.startsWith(DLEVENT_PREFIX)) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(line.slice(DLEVENT_PREFIX.length));
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'object' || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+
+  if (obj.t === 'think' && typeof obj.text === 'string') {
+    return { t: 'think', text: obj.text };
+  }
+
+  if (obj.t === 'tool' && typeof obj.status === 'string') {
+    if (obj.status === 'start' && typeof obj.id === 'string') {
+      return {
+        t: 'tool',
+        status: 'start',
+        id: obj.id,
+        name: typeof obj.name === 'string' ? obj.name : 'tool',
+        args: typeof obj.args === 'string' ? obj.args : '',
+        ...(typeof obj.argsFull === 'string' ? { argsFull: obj.argsFull } : {}),
+      };
+    }
+    if (obj.status === 'result' && typeof obj.ok === 'boolean') {
+      return {
+        t: 'tool',
+        status: 'result',
+        ...(typeof obj.id === 'string' ? { id: obj.id } : {}),
+        ok: obj.ok,
+        ...(typeof obj.summary === 'string' ? { summary: obj.summary } : {}),
+      };
+    }
+  }
+  return null;
+}
+
+
 /** Map a dsh error CODE to a user-friendly message; null = unknown code. */
 export function errorHint(code: string): string | null {
   switch (code) {

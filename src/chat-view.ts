@@ -8,7 +8,7 @@ import { scanSkillRoots, type SkillEntry, type ScanRoot } from './skills';
 import { SkillSuggest } from './skill-suggest';
 import { MODEL_OPTIONS, REASONING_OPTIONS, PERMISSION_OPTIONS, permissionLabel } from './settings';
 import { ContextMeter, estimateTokens } from './context-meter';
-import { parseHeadlessOutput, errorHint, contextWindowFor, resolveVaultRelativeDir } from './pure';
+import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir } from './pure';
 import { HistoryTool } from './history';
 import { MentionSuggest } from './mention';
 import { ChipEditor } from './chip-editor';
@@ -432,71 +432,67 @@ export class ChatView extends ItemView {
     const toolsHistory: HistoryTool[] = [];
     let thinkingText = '';
     const handleStreamLine = (line: string): void => {
-      if (!line.startsWith('DLEVENT\t')) return;
-      let evt: { t?: string; text?: string; status?: string; id?: string; name?: string; args?: string; argsFull?: string; ok?: boolean; summary?: string };
-      try {
-        evt = JSON.parse(line.slice('DLEVENT\t'.length)) as typeof evt;
-      } catch {
-        return;
-      }
-      if (evt.t === 'think' && typeof evt.text === 'string') {
+      const evt = parseDshEventLine(line);
+      if (!evt) return;
+      if (evt.t === 'think') {
         thinkingText += evt.text;
         if (thinkBody) {
           thinkBody.setText(thinkingText.length > 4000 ? `…${thinkingText.slice(-4000)}` : thinkingText);
         }
         this.scrollToBottom();
-      } else if (evt.t === 'tool' && evt.status) {
-        if (!toolsWrap) return; // tool display disabled
-        if (evt.status === 'start' && evt.id) {
-          // One tool call block: clickable header + expanded content
-          const call = toolsWrap.createDiv({ cls: 'dsh-tool-call' });
-          const header = call.createEl('button', { cls: 'dsh-tool-header' });
-          const icon = header.createSpan({ cls: 'dsh-tool-icon' });
-          setIcon(icon, 'wrench');
-          header.createSpan({ cls: 'dsh-tool-name', text: evt.name ?? 'tool' });
-          header.createSpan({ cls: 'dsh-tool-summary', text: evt.args ?? '' });
-          const status = header.createSpan({ cls: 'dsh-tool-status status-running' });
-          setIcon(status, 'loader-circle');
-          const chevron = header.createSpan({ cls: 'dsh-tool-chevron' });
-          setIcon(chevron, 'chevron-right');
-          const content = call.createDiv({ cls: 'dsh-tool-content hidden' });
-          // Show the full arguments (the detailed command) right away
-          if (evt.argsFull) {
-            content.createDiv({ cls: 'dsh-tool-cmd', text: evt.argsFull });
-          }
-          header.onclick = () => {
-            const collapsed = content.classList.contains('hidden');
-            content.classList.toggle('hidden', !collapsed);
-            setIcon(chevron, collapsed ? 'chevron-down' : 'chevron-right');
-          };
-          toolRows.set(evt.id, { status, chevron, content, name: evt.name ?? 'tool', args: evt.argsFull ?? evt.args ?? '' });
-        } else if (evt.status === 'result') {
-          const entry = evt.id ? toolRows.get(evt.id) : undefined;
-          if (entry) {
-            entry.status.classList.remove('status-running');
-            if (evt.ok) {
-              entry.status.classList.add('status-completed');
-              setIcon(entry.status, 'check');
-            } else {
-              entry.status.classList.add('status-error');
-              setIcon(entry.status, 'x');
-            }
-            const lineText = evt.summary
-              ? evt.summary
-              : evt.ok ? t('chat.toolNoOutput') : t('chat.toolFailed');
-            // Tools stay collapsed by default; result visible when expanded.
-            entry.content.createDiv({ cls: 'dsh-tool-line', text: lineText });
-            // Collect for history
-            toolsHistory.push({
-              name: entry.name,
-              args: entry.args,
-              ok: evt.ok !== false,
-              summary: evt.summary || undefined,
-            });
-          }
-        }
-        this.scrollToBottom();
+        return;
       }
+      // evt.t === 'tool'
+      if (!toolsWrap) return; // tool display disabled
+      if (evt.status === 'start') {
+        // One tool call block: clickable header + expanded content
+        const call = toolsWrap.createDiv({ cls: 'dsh-tool-call' });
+        const header = call.createEl('button', { cls: 'dsh-tool-header' });
+        const icon = header.createSpan({ cls: 'dsh-tool-icon' });
+        setIcon(icon, 'wrench');
+        header.createSpan({ cls: 'dsh-tool-name', text: evt.name });
+        header.createSpan({ cls: 'dsh-tool-summary', text: evt.args });
+        const status = header.createSpan({ cls: 'dsh-tool-status status-running' });
+        setIcon(status, 'loader-circle');
+        const chevron = header.createSpan({ cls: 'dsh-tool-chevron' });
+        setIcon(chevron, 'chevron-right');
+        const content = call.createDiv({ cls: 'dsh-tool-content hidden' });
+        // Show the full arguments (the detailed command) right away
+        if (evt.argsFull) {
+          content.createDiv({ cls: 'dsh-tool-cmd', text: evt.argsFull });
+        }
+        header.onclick = () => {
+          const collapsed = content.classList.contains('hidden');
+          content.classList.toggle('hidden', !collapsed);
+          setIcon(chevron, collapsed ? 'chevron-down' : 'chevron-right');
+        };
+        toolRows.set(evt.id, { status, chevron, content, name: evt.name, args: evt.argsFull ?? evt.args });
+      } else {
+        const entry = evt.id ? toolRows.get(evt.id) : undefined;
+        if (entry) {
+          entry.status.classList.remove('status-running');
+          if (evt.ok) {
+            entry.status.classList.add('status-completed');
+            setIcon(entry.status, 'check');
+          } else {
+            entry.status.classList.add('status-error');
+            setIcon(entry.status, 'x');
+          }
+          const lineText = evt.summary
+            ? evt.summary
+            : evt.ok ? t('chat.toolNoOutput') : t('chat.toolFailed');
+          // Tools stay collapsed by default; result visible when expanded.
+          entry.content.createDiv({ cls: 'dsh-tool-line', text: lineText });
+          // Collect for history
+          toolsHistory.push({
+            name: entry.name,
+            args: entry.args,
+            ok: evt.ok,
+            summary: evt.summary || undefined,
+          });
+        }
+      }
+      this.scrollToBottom();
     };
 
     // Status line

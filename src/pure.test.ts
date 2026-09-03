@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   parseHeadlessOutput,
+  parseDshEventLine,
   errorHint,
   versionCmp,
   contextWindowFor,
@@ -48,6 +49,55 @@ describe('parseHeadlessOutput', () => {
     expect(parseHeadlessOutput('')).toBe('');
   });
 });
+
+describe('parseDshEventLine', () => {
+  it('parses think events with string text', () => {
+    expect(parseDshEventLine('DLEVENT\t{"t":"think","text":"hello"}'))
+      .toEqual({ t: 'think', text: 'hello' });
+  });
+
+  it('parses tool start events and fills optional display fields', () => {
+    expect(parseDshEventLine(
+      'DLEVENT\t{"t":"tool","status":"start","id":"call-1","name":"bash","args":"ls","argsFull":"{\\"cmd\\":\\"ls\\"}"}',
+    )).toEqual({
+      t: 'tool',
+      status: 'start',
+      id: 'call-1',
+      name: 'bash',
+      args: 'ls',
+      argsFull: '{"cmd":"ls"}',
+    });
+  });
+
+  it('parses tool result events with ok false and summary', () => {
+    expect(parseDshEventLine(
+      'DLEVENT\t{"t":"tool","status":"result","id":"call-1","ok":false,"summary":"boom"}',
+    )).toEqual({
+      t: 'tool',
+      status: 'result',
+      id: 'call-1',
+      ok: false,
+      summary: 'boom',
+    });
+  });
+
+  it('returns null for non-DLEVENT lines', () => {
+    expect(parseDshEventLine('plain output')).toBeNull();
+    expect(parseDshEventLine('DLEVENT')).toBeNull();
+  });
+
+  it('returns null for malformed JSON', () => {
+    expect(parseDshEventLine('DLEVENT\t{"t":"think",}')).toBeNull();
+  });
+
+  it('returns null for unknown or incomplete event shapes', () => {
+    expect(parseDshEventLine('DLEVENT\t{"t":"nope"}')).toBeNull();
+    expect(parseDshEventLine('DLEVENT\t{"t":"think"}')).toBeNull();
+    expect(parseDshEventLine('DLEVENT\t{"t":"tool","status":"start"}')).toBeNull();
+    expect(parseDshEventLine('DLEVENT\t{"t":"tool","status":"result","id":"x"}')).toBeNull();
+  });
+});
+
 
 describe('errorHint', () => {
   it('maps credential codes to a hint', () => {
