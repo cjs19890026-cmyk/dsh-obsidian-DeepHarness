@@ -389,6 +389,12 @@ class DshClient {
 - [ ] 运行历史(复用 DSH sessions 存储,展示历史会话)
 - [ ] 概念地图/周报模板等 Claudian 特色功能的 DSH 化实现
 
+### Phase 4 — 云同步 vault 兼容(填坑,见 §10)
+- [ ] 插件专属 DSH_HOME 迁出 vault → `~/.dsh/deepharness/<vaultKey>` 或 Obsidian userData
+- [ ] spawn 前防线断言:DSH_HOME 绝不在 vaultRoot 之下
+- [ ] 升级迁移:检测旧 `<vault>/.obsidian/plugins/deepharness/dsh-home`,复制用户数据 + 异步删旧树
+- [ ] 清理/改写 AI_CONTEXT 红线第 1 条(dsh-home 路径依赖)与 DESIGN §3 的 DSH_HOME 示意
+
 ---
 
 ## 9. 已验证事实清单(本机实测)
@@ -411,3 +417,4 @@ class DshClient {
 | 需要用户预装 DSH 与凭据 | 插件设置页给出明确引导步骤(检测 + 文案) |
 | 移动端不支持 | `isDesktopOnly: true` |
 | 每次启动有模型推理延迟(冷启动) | 预热 profile;状态机明确展示「启动中」 |
+| **⚠️ 插件专属 DSH_HOME 建在 vault 内(`<vault>/.obsidian/plugins/deepharness/dsh-home`)**:dsh 首次运行在该 home 下自举 `profiles/node_modules` 依赖树(几百包/数万文件)。macOS 为 symlink 农场(530 链接,无害);Windows 无开发者模式时退回实体拷贝 → 数万小文件进入 iCloud/OneDrive 同步队列 → 云同步卡死(用户 Issues 实证) | **待修(架构层)**:DSH_HOME 迁出 vault 到系统用户目录(`~/.dsh/deepharness/<vaultKey>` 或 Obsidian userData),vault 内只留三件套 + 用户可编辑小文本;spawn 前断言 DSH_HOME 不在 vaultRoot 下;升级时检测/迁移/清理旧树。详见 MAINTENANCE.md 2026-09-03 条目 |

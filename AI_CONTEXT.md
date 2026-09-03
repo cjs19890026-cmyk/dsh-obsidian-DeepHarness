@@ -81,6 +81,7 @@ npx tsc --noEmit         # 类型检查
 ## 不能改的边界(红线)
 
 - 插件 `id` 与文件夹名 `deepharness`:history.json、dsh-home、generated 的绝对路径依赖它
+  (注:2026-09-03 起规划把 dsh-home/history 迁出 vault 到系统目录,路径依赖随迁,id/文件夹名仍不变,见下方「已知待填坑」)
 - `nodeBuiltins` 与 `obsidian` 必须保持 external,禁止打进 bundle
 - **不收集 API Key**:凭据只走用户本地 DSH_HOME / 环境变量,插件无外发网络请求
 - `DSH_PERMISSION_MODE`(沙箱模式)≠ `DSH_TOOLS_MODE`(工具后端),勿混淆(曾有历史 bug)
@@ -92,6 +93,20 @@ npx tsc --noEmit         # 类型检查
 
 发布到社区市场的完整步骤见 `docs/publish-checklist.md`。要点:tag 不带 `v`、
 Release 必须带 main.js/manifest.json/styles.css 三件套、仓库必须 public。
+
+## ⚠️ 已知待填坑(下次升级必读)
+
+**插件 DSH_HOME 建在 vault 内部 = 架构缺陷,待修复**(详见本地 `MAINTENANCE.md` 顶部
+2026-09-03 条目)。用户 Issues 实证:Windows + iCloud Drive 下,`pluginHomeDir()`
+(`<vault>/.obsidian/plugins/deepharness/dsh-home`,dsh-runner.ts:372)被 dsh 首次运行
+自举出整棵 node_modules(几百包/数万文件)→ iCloud 同步卡死。
+
+- **为什么现在没爆**:macOS 上自举条目是 symlink(530 链接/6.9MB);Windows 无开发者模式时
+  symlink 失败 → 实体拷贝 → 数万小文件进同步队列
+- **修复方向**:把插件专属 DSH_HOME 迁到系统用户目录(如 `~/.dsh/deepharness/<vaultKey>`
+  或 Obsidian userData),vault 内只留三件套 + 用户可编辑小文本;spawn 前断言 DSH_HOME
+  不在 vaultRoot 下;升级时检测/迁移/清理旧树
+- 红线第 1 条("dsh-home 绝对路径依赖 id")在迁出后需同步改写
 
 ## 交接机制
 
