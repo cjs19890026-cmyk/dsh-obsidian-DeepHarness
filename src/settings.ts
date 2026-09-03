@@ -2,6 +2,7 @@ import { App, PluginSettingTab, Setting, type SettingDefinitionItem, type Settin
 import type DshPlugin from './main';
 import { t, Locale } from './i18n';
 import { DshRunner } from './dsh-runner';
+import { FolderSuggestModal } from './modals';
 
 export interface DshSettings {
   dshBin: string;
@@ -53,7 +54,9 @@ export const DEFAULT_SETTINGS: DshSettings = {
   showTools: true,
   historyLimit: 50,
   obsidianSkill: true,
-  extraSkillDirs: 'Library/Skills, .claude/skills',
+  // Optional by design: novices should not inherit the creator's folders.
+  // Examples live in the placeholder/desc; pick via the "Browse…" button.
+  extraSkillDirs: '',
   apiKey: '',
   provider: 'deepseek-official',
 };
@@ -303,6 +306,19 @@ export class DshSettingTab extends PluginSettingTab {
               .onChange(async (value) => {
                 s.extraSkillDirs = value;
                 await this.plugin.saveSettings();
+              }));
+            // Folder picker: novice-friendly way to add vault folders without
+            // typing a path (picked folders are vault-internal by construction).
+            setting.addButton((button) => button
+              .setButtonText(t('settings.extraSkillDirs.pick'))
+              .onClick(() => {
+                new FolderSuggestModal(this.app, (picked) => {
+                  const existing = s.extraSkillDirs.split(',').map((x) => x.trim()).filter(Boolean);
+                  if (!existing.includes(picked)) existing.push(picked);
+                  s.extraSkillDirs = existing.join(', ');
+                  void this.plugin.saveSettings();
+                  this.update();
+                }).open();
               }));
           }),
 

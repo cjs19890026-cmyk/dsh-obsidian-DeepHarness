@@ -8,7 +8,7 @@ import { scanSkillRoots, type SkillEntry, type ScanRoot } from './skills';
 import { SkillSuggest } from './skill-suggest';
 import { MODEL_OPTIONS, REASONING_OPTIONS, PERMISSION_OPTIONS, permissionLabel } from './settings';
 import { ContextMeter, estimateTokens } from './context-meter';
-import { parseHeadlessOutput, errorHint, contextWindowFor } from './pure';
+import { parseHeadlessOutput, errorHint, contextWindowFor, resolveVaultRelativeDir } from './pure';
 import { HistoryTool } from './history';
 import { MentionSuggest } from './mention';
 import { ChipEditor } from './chip-editor';
@@ -522,9 +522,17 @@ export class ChatView extends ItemView {
 
       this.stopStatusTimer();
 
-      if (result.killed) {
-        // Stopped by user: keep it subtle — a small status note only.
+      if (result.killReason === 'user') {
+        // Stopped by the user: keep it subtle — a small status note only.
         statusEl.setText(`⏹ ${t('chat.cancelled')}`);
+        this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
+      } else if (result.killReason === 'timeout') {
+        // Auto-stopped after the configured timeout: surface it as an error
+        // with its own message, so it is never mistaken for a manual stop.
+        const msg = t('chat.timedOut');
+        statusEl.setText(`✗ ${msg}`);
+        statusEl.addClass('dsh-status-error');
+        contentEl.createSpan({ text: `> ❌ ${msg}`, cls: 'dsh-error-inline' });
         this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
       } else if (result.exitCode !== 0 || !result.stdout.trim()) {
         const errMsg = this.extractError(result.stderr);
@@ -1143,8 +1151,10 @@ export class ChatView extends ItemView {
       { dir: path.join(this.runner.pluginHomeDir(vaultRoot), 'skills'), source: 'plugin' },
     ];
     for (const rel of this.plugin.settings.extraSkillDirs.split(',')) {
-      const t = rel.trim();
-      if (t) roots.push({ dir: path.resolve(vaultRoot, t), source: 'extra' });
+      // Only vault-internal relative directories are scanned: absolute paths
+      // and `../` escapes are rejected (see resolveVaultRelativeDir).
+      const dir = resolveVaultRelativeDir(vaultRoot, rel);
+      if (dir) roots.push({ dir, source: 'extra' });
     }
     return scanSkillRoots(roots);
   }

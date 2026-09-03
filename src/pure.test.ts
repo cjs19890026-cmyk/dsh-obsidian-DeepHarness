@@ -9,6 +9,7 @@ import {
   MODEL_CONTEXT_WINDOWS,
   streamRelayPatchYaml,
   shimJsTarget,
+  resolveVaultRelativeDir,
 } from './pure';
 import { estimateTokens } from './context-meter';
 
@@ -181,5 +182,43 @@ describe('shimJsTarget', () => {
   it('returns null for non-shim content', () => {
     expect(shimJsTarget('#!/usr/bin/env node\nconsole.log(1)')).toBeNull();
     expect(shimJsTarget('random text')).toBeNull();
+  });
+});
+
+describe('resolveVaultRelativeDir (extraSkillDirs boundary)', () => {
+  // Path math only — nothing is read from / written to the filesystem.
+  const vault = path.join(path.sep, 'Users', 'me', 'Vault');
+
+  it('accepts a plain vault-relative subfolder', () => {
+    expect(resolveVaultRelativeDir(vault, 'Library/Skills'))
+      .toBe(path.join(vault, 'Library', 'Skills'));
+  });
+
+  it('accepts nested folders, whitespace and "."', () => {
+    expect(resolveVaultRelativeDir(vault, 'a/b/c')).toBe(path.join(vault, 'a', 'b', 'c'));
+    expect(resolveVaultRelativeDir(vault, '  Skills  ')).toBe(path.join(vault, 'Skills'));
+    expect(resolveVaultRelativeDir(vault, '.')).toBe(vault);
+    expect(resolveVaultRelativeDir(vault, 'Skills/..')).toBe(vault);
+  });
+
+  it('rejects empty and whitespace-only input', () => {
+    expect(resolveVaultRelativeDir(vault, '')).toBeNull();
+    expect(resolveVaultRelativeDir(vault, '   ')).toBeNull();
+  });
+
+  it('rejects absolute paths (even ones inside the vault)', () => {
+    expect(resolveVaultRelativeDir(vault, '/etc')).toBeNull();
+    expect(resolveVaultRelativeDir(vault, path.join(vault, 'Skills'))).toBeNull();
+  });
+
+  it('rejects "../" escapes out of the vault', () => {
+    expect(resolveVaultRelativeDir(vault, '..')).toBeNull();
+    expect(resolveVaultRelativeDir(vault, '../secret')).toBeNull();
+    expect(resolveVaultRelativeDir(vault, 'Skills/../../secret')).toBeNull();
+    expect(resolveVaultRelativeDir(vault, 'a/../../..')).toBeNull();
+  });
+
+  it.skipIf(process.platform !== 'win32')('rejects Windows drive-absolute input', () => {
+    expect(resolveVaultRelativeDir('C:\\Users\\me\\Vault', 'D:\\evil')).toBeNull();
   });
 });

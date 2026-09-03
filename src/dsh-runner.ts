@@ -3,7 +3,7 @@ import { promisify } from 'util';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import { versionCmp, streamRelayPatchYaml, shimJsTarget } from './pure';
+import { versionCmp, streamRelayPatchYaml, shimJsTarget, resolveVaultRelativeDir } from './pure';
 import type { DshDiagnostics } from './dsh-client';
 import type { DshSettings } from './settings';
 import { ensureObsidianSkill as writeObsidianSkill, MEMORY_FILE } from './obsidian-skill';
@@ -69,8 +69,11 @@ const PERSONA_VERSION = 5;
  * Fallback definition of the OpenCode Go provider, used when the user's real
  * DSH_HOME does not declare `llm-pi-ai.providers.opencode-go`. Mirrors the
  * config shipped in the official ~/.dsh/settings.yaml defaults.
+ *
+ * Model ids here MUST stay in sync with `MODEL_OPTIONS` in settings.ts — the
+ * consistency is guarded by provider-fallback.test.ts.
  */
-const OPENCODE_GO_PROVIDER_FALLBACK = [
+export const OPENCODE_GO_PROVIDER_FALLBACK = [
   'llm-pi-ai:',
   '  providers:',
   '    opencode-go:',
@@ -88,6 +91,9 @@ const OPENCODE_GO_PROVIDER_FALLBACK = [
   '          contextWindow: 131072',
   '        - id: deepseek-v4-pro',
   '          name: DeepSeek V4 Pro',
+  '          contextWindow: 131072',
+  '        - id: deepseek-v4-flash-vision-exp',
+  '          name: DeepSeek V4 Flash Vision (Exp)',
   '          contextWindow: 131072',
 ];
 
@@ -521,9 +527,11 @@ export class DshRunner {
   ensureSkillDirsPatch(vaultRoot: string): string | null {
     const dirs: string[] = [];
     for (const rel of this.settings.extraSkillDirs.split(',')) {
-      const t = rel.trim();
-      if (!t) continue;
-      const abs = path.resolve(vaultRoot, t);
+      // Only vault-internal relative directories are accepted: an absolute
+      // path or a `../` escape would point DSH's skill scanner outside the
+      // vault, so such entries are rejected (skipped).
+      const abs = resolveVaultRelativeDir(vaultRoot, rel);
+      if (!abs) continue;
       try {
         if (fs.statSync(abs).isDirectory()) dirs.push(abs);
       } catch {

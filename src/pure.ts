@@ -2,6 +2,7 @@
  * Obsidian-free pure helpers, extracted so they can be unit-tested in Node
  * without pulling in the `obsidian` API.
  */
+import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { t } from './i18n';
 
@@ -110,4 +111,30 @@ export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
 /** Resolve the context window for a model id (safe default). */
 export function contextWindowFor(model: string): number {
   return MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
+}
+
+/**
+ * Resolve a user-configured, vault-relative directory against the vault root.
+ *
+ * Guards every consumer of `extraSkillDirs` (the skill UI scan and the DSH
+ * skill-dirs patch): the setting is documented as "vault-relative folders",
+ * so an absolute path or a `../` sequence must never move the skill boundary
+ * outside the vault.
+ *
+ * Returns the absolute directory, or null when the input is empty, is an
+ * absolute path, or would escape the vault root via `..`.
+ */
+export function resolveVaultRelativeDir(vaultRoot: string, rel: string): string | null {
+  const t = rel.trim();
+  if (!t) return null;
+  // Absolute paths ('/…' on POSIX, 'C:\…' on Windows) are never vault-relative.
+  if (path.isAbsolute(t)) return null;
+  const base = path.resolve(vaultRoot, t);
+  const relToRoot = path.relative(vaultRoot, base);
+  // `..` / `../…` escape the vault; an absolute relToRoot can only happen on
+  // Windows across different drives, which is an escape as well.
+  if (relToRoot === '..' || relToRoot.startsWith('..' + path.sep) || path.isAbsolute(relToRoot)) {
+    return null;
+  }
+  return base;
 }

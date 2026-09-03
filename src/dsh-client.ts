@@ -51,8 +51,12 @@ export interface DshRunResult {
   stdout: string;
   stderr: string;
   durationMs: number;
-  /** True when terminated by user/timeout rather than by dsh itself. */
+  /** True when terminated by user/timeout rather than by dsh itself
+   *  (kept for callers of the old shape; equals `killReason !== null`). */
   killed: boolean;
+  /** Why the run was terminated early, so the UI can tell a timeout
+   *  apart from a user-initiated stop. null = dsh exited on its own. */
+  killReason: 'timeout' | 'user' | null;
 }
 
 export interface DshDiagnostics {
@@ -128,7 +132,7 @@ export class DshClient {
       const startedAt = Date.now();
       let stdout = '';
       let stderr = '';
-      let killed = false;
+      let killReason: DshRunResult['killReason'] = null;
       let settled = false;
 
       const finish = (exitCode: number | null): void => {
@@ -140,7 +144,8 @@ export class DshClient {
           stdout,
           stderr,
           durationMs: Date.now() - startedAt,
-          killed,
+          killed: killReason !== null,
+          killReason,
         });
       };
 
@@ -154,6 +159,14 @@ export class DshClient {
         detached: true,
       });
       this.child = child;
+
+      // The first termination request wins: a timeout and a user stop racing
+      // each other must not overwrite the reason that was reported first.
+      const requestKill = (reason: 'timeout' | 'user'): void => {
+        if (killReason !== null) return;
+        killReason = reason;
+        this.killChild(child);
+      };
 
       let stdoutBuffer = '';
 
@@ -190,23 +203,16 @@ export class DshClient {
 
       // Timeout
       if (opts.timeoutMs && opts.timeoutMs > 0) {
-        const timer = window.setTimeout(() => {
-          killed = true;
-          this.killChild(child);
-        }, opts.timeoutMs);
+        const timer = window.setTimeout(() => requestKill('timeout'), opts.timeoutMs);
         child.on('close', () => window.clearTimeout(timer));
       }
 
       // User cancellation
       if (opts.signal) {
         if (opts.signal.aborted) {
-          killed = true;
-          this.killChild(child);
+          requestKill('user');
         } else {
-          opts.signal.addEventListener('abort', () => {
-            killed = true;
-            this.killChild(child);
-          }, { once: true });
+          opts.signal.addEventListener('abort', () => requestKill('user'), { once: true });
         }
       }
     });
@@ -247,12 +253,15 @@ export class DshClient {
     };
     try {
       kill('SIGTERM');
-      // Escalate after a grace period.
-      window.setTimeout(() => {
+      // Escalate after a grace period, unless the child already exited.
+      // Cleared on close so no stray timer keeps the process alive.
+      const escalate = (): void => {
         if (child.exitCode === null && child.signalCode === null) {
           kill('SIGKILL');
         }
-      }, 3000);
+      };
+      const timer = window.setTimeout(escalate, 3000);
+      child.once('close', () => window.clearTimeout(timer));
     } catch {
       // Already gone
     }
