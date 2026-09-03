@@ -12,6 +12,7 @@ vi.mock('obsidian', () => ({
 }));
 
 import { HistoryStore } from './history';
+import { t } from './i18n';
 import type { HistoryTurn, SessionRecord } from './history';
 
 const HISTORY_FILE = 'history.json';
@@ -141,6 +142,17 @@ describe('HistoryStore', () => {
       effort: 'max',
       permission: 'workspace-write',
     });
+  });
+
+  it('uses the localized default title when the first message is blank', async () => {
+    // Tests run with the i18n default locale (en): the fallback must come from
+    // t('chat.newSession'), not a hardcoded Chinese '新会话'.
+    expect(t('chat.newSession')).toBe('New session');
+    const store = makeHistory(10);
+    await store.load();
+    await store.addTurn(makeTurn('   \n\t ', 7), makeMeta());
+    expect(store.getCurrentSession().title).toBe('New session');
+    expect(store.getCurrentSession().title).not.toBe('新会话');
   });
 
   it('trims non-pinned sessions over the limit and keeps the newest ones', async () => {
