@@ -18,6 +18,15 @@
 
 ## 当前交接重点：第一/二阶段已完成，下面为剩余任务
 
+### 最近交接摘要（HistoryStore 默认标题走 i18n，2026-09-03，已提交 84596f0，未推送）
+- 已完成：**HistoryStore 默认标题 i18n**（P2-J / 剩余任务“下一批低风险代码修复”）。
+- 改动文件：
+  - src/history.ts：titleFromTurn 兜底 '新会话' → t('chat.newSession')；顺带把局部变量 t 改名 title，消除对 i18n t() 的遮蔽（这是该函数之前硬编码中文的根因）。
+  - src/history.test.ts：+1 测试——首条消息为空白时，会话标题取 t('chat.newSession')（测试 locale 默认 en → New session），并断言不是硬编码 新会话。
+- 验证基线：npm test = 112 passed / 2 skipped（原 111 + 1），npx tsc --noEmit、npm run build、npx eslint src/*.ts（0 errors）全部通过。
+- 已提交（hash：`84596f0`），尚未推送。
+- 本批低风险修复（env 白名单 → P2-D → 原子写 → HistoryStore i18n）告一段落：`bf9915d` / `ad61a92` / `c68aa17` / `84596f0` 均已本地提交、未推送；后续开发交给下一个 agent，模板见文末第 10 节。
+
 ### 最近交接摘要（生成文件原子写，2026-09-03，已提交 c68aa17，未推送）
 - 已完成：**生成文件原子写**（P2-G / 剩余任务“下一批低风险代码修复”）。
 - 改动文件：
@@ -86,7 +95,7 @@
 - [x] 子进程环境变量白名单：不再把整个 `process.env` 传给 dsh 子进程，只保留必要项和插件注入项（提交 hash：`bf9915d`；未推送）
 - [x] P2-D：设置页补 API Key 明文存储风险提示；keychain 经评估暂不引入（settings.apiKey.warning + .dsh-setting-warning）
 - [x] 生成文件原子写：`ensurePluginDshHome` / `ensureVaultPatch` / `ensureSkillDirsPatch` 改为 tmp + rename，参考 `HistoryStore.save`（提交 hash：`c68aa17`；未推送）
-- [ ] `HistoryStore.titleFromTurn` 默认标题走 `t('chat.newSession')`，去掉硬编码中文 `'新会话'`
+- [x] `HistoryStore.titleFromTurn` 默认标题走 `t('chat.newSession')`，去掉硬编码中文 `'新会话'`（提交 hash：`84596f0`；未推送）
 - [ ] `linkifyAnswer` 缓存 vault 文件/别名列表，并监听 vault 变更失效，避免每次回答全库扫描
 - [ ] `scanSkills` 缓存或异步化，避免每次打开面板/触发建议时同步读盘
 - [x] `settings.ts` 中 E 项新增代码的缩进/空行整理（功能正常，可读性一般）；i18n 新 key 缩进已对齐
@@ -108,7 +117,7 @@
 
 - 分支与 git：
   - 当前分支 `dsh-obsidian-deepharness-new-architecture` 已推送到远程同名分支。
-  - 最近提交：`c68aa17 feat(dsh-runner): write generated files atomically (tmp + rename)`（bf9915d / ad61a92 / c68aa17 均未推送）
+  - 最近提交：`84596f0 fix(history): use t('chat.newSession') for the default session title`（bf9915d / ad61a92 / c68aa17 / 84596f0 均未推送）
   - 若需要合并主线 / PR / push，由用户决定。
 - 本地验证：
   - `npm test`、`npx tsc --noEmit`、`npm run build` 应全部通过。
@@ -214,9 +223,9 @@
 - 打开技能面板或 `/` 建议时同步 `readdirSync` + `readFileSync`。
 - 修复：缓存 + 失效，或异步化。
 
-### P2-J 历史默认标题硬编码中文
-- `HistoryStore.titleFromTurn` 中 `'新会话'` 未走 i18n（history.ts 51 行）。
-- 修复：使用 `t('chat.newSession')`。
+### P2-J 历史默认标题硬编码中文（状态：已完成）
+- [x] `HistoryStore.titleFromTurn` 原来兜底 `'新会话'` 未走 i18n（局部变量 t 遮蔽了 i18n t()）。
+- [x] 修复：局部变量改名 `title`，兜底改 `t('chat.newSession')`；提交 hash：`84596f0`，未推送。
 
 ### P2-K 运行中关闭视图/插件卸载的状态不完整
 - `onClose` 会 `client.dispose()`，但 `sendMessage` 的 promise 稍后 settle 仍可能操作 DOM、写历史。
@@ -447,7 +456,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 3. [x] 子进程 env 白名单化（`src/dsh-client.ts` 的 `DSH_ENV_ALLOWLIST` + `buildDshEnv`，+8 测试）。
 4. [x] API Key 存储风险有提示（P2-D：settings.apiKey.warning 风险提示；提交 hash：`ad61a92`）。
 5. [x] 生成文件统一原子写（`writeFileAtomicSync`，settings.yaml / vault.yml(.bak) / stream-relay.js / stream.yml / skill-dirs.yml；提交 hash：`c68aa17`）。
-6. `HistoryStore` 默认标题走 i18n。
+6. [x] `HistoryStore` 默认标题走 i18n（`titleFromTurn` 兜底用 `t('chat.newSession')`；提交 hash：`84596f0`）。
 7. linkify / skill 扫描有缓存或异步化。
 8. 运行中关闭面板/卸载时状态与部分轮次处理完整。
 9. DSH_HOME / patch / workdir 降级失败在 UI 可见。
@@ -465,7 +474,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 | `src/dsh-client.ts` | `killReason`、依赖注入、子进程 env 白名单（`DSH_ENV_ALLOWLIST` + `buildDshEnv` + `opts.env`）均已完成 |
 | `src/pure.ts` | 已有 `parseDshEventLine`、`resolveVaultRelativeDir` 等纯函数 |
 | `src/settings.ts` | 已增加可写性诊断、文件夹选择器、API Key 明文存储风险提示（`settings.apiKey.warning`）；剩余 string→union 收紧 |
-| `src/history.ts` | 已有原子写与基础测试；剩余默认标题 i18n |
+| `src/history.ts` | 已有原子写与基础测试；默认标题已走 `t('chat.newSession')`（P2-J） |
 | `package.json` | 剩余固定 `obsidian: latest` |
 | `package-lock.json` | 已同步为 `0.1.6` |
 | `.github/workflows/release.yml` | 已使用 Node 22 + `npm ci` + test + build；可再升级 actions 到 v4 |
@@ -488,7 +497,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 
 ---
 
-## 10. 给下一个 Agent 的提示词模板
+## 10. 给下一个 Agent 的提示词模板（2026-09-03 更新：第四阶段低风险修复批告一段落后使用）
 
 > 把下面这段发给下一个写代码的 agent：
 
@@ -499,32 +508,38 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 /Users/mymac/deepseek workplace/dsh-obsidian-deepharness-new-architecture
 
 先阅读：
-1. HANDOFF.md（本文档，重点看顶部“最近交接摘要”和剩余任务）
+1. HANDOFF.md（重点看顶部“最近交接摘要”与“剩余任务”）
 2. AI_CONTEXT.md（稳定项目上下文）
 3. 如本地有 MAINTENANCE.md，再看其顶部维护摘要
 
-当前分支已推送到远程：dsh-obsidian-deepharness-new-architecture
-最近提交：0427336
+当前状态：
+- 分支 dsh-obsidian-deepharness-new-architecture：远程已推至 0427336；本地另有未推送提交 bf9915d / ad61a92 / c68aa17 / 84596f0。push 前先让用户确认，并绕代理：git -c http.proxy= -c https.proxy= push
+- “第四阶段”低风险修复批（子进程 env 白名单 / P2-D API Key 风险提示 / 生成文件原子写 / HistoryStore 标题 i18n）已完成。下一步从“剩余任务”按建议顺序挑低风险项，例如：
+  1. P1-5：DshSettings 的 model / reasoningEffort / permissionMode / toolExecutionMode 收窄为 option 推导的 union，并在 loadSettings 对非法值回退
+  2. P2-H：linkifyAnswer 缓存 vault 文件/别名列表并监听 vault 变更失效，避免每次回答全库扫描
+  3. P2-I：scanSkills 缓存或异步化，避免每次开面板/触发建议同步读盘
+  4. 发布前必须完成：固定 package.json 的 “obsidian”: “latest”；release 流程校验 tag 与 manifest.json 版本一致
+  5. P2-K（中等风险，建议单独做）：运行中关闭面板/插件卸载的运行生命周期
+- 暂不要做：拆 chat-view.ts / dsh-runner.ts 大结构、引入 RunController 状态机等结构级工作（高风险阶段另行安排）。
 
-本次建议只做下一步低风险任务：
-【子进程环境变量白名单】
-- 目标：DshClient 不再把整个 process.env 传给 dsh 子进程，只保留必要项和插件显式注入项。
-- 需要同步补 fake spawn 测试，断言传给 spawn 的 env 只包含白名单变量 + DSH_HOME / API key / DSH_TOOLS_MODE / DSH_PERMISSION_MODE / PATH 修正等必需注入项。
-- 不要拆 chat-view.ts / dsh-runner.ts 的大结构。
-- 不要改 DLEVENT 线协议。
-- 不要改生成文件路径和 dsh-home 相关约定。
-- 新增用户可见文案必须走 t()，en/zh 必须成对添加。
+红线与约定（务必遵守）：
+- 不改 DLEVENT 线协议；不改生成文件路径与 dsh-home 约定（vault/.obsidian/plugins/deepharness/generated/*、dsh-home/ 已被真实用户使用）。
+- 新增用户可见文案一律走 t()，en/zh 成对添加；不要改动既有 key 的文案。
+- 生成文件继续用 dsh-runner 的 writeFileAtomicSync（tmp + rename），不要直接 writeFileSync 目标文件。
+- DshClient 子进程 env 只允许 buildDshEnv（DSH_ENV_ALLOWLIST + opts.env + 插件注入项），禁止整份透传 process.env。
+- Obsidian 设置页是 1.13 声明式 API，不要改回 display()；onunload() 必须同步完成。
+- 测试不要 window shim；obsidian 包 main 为空需 vi.mock。
+- 本仓库是 git worktree：.git 在 /Users/mymac/deepseek workplace/dsh-obsidian/.git（位于会话工作区之外，git 写操作如被沙箱拒绝可用 full access 执行；提交前仍须用户确认）。
 
 每完成一小步必须跑：
 - npm test
 - npx tsc --noEmit
 - npm run build
 - npx eslint src/*.ts
-当前基线：100 passed / 2 skipped，eslint 0 errors。
+当前基线：112 passed / 2 skipped，eslint 0 errors。
 
 本机注意：
-- npm ci 若 EPERM，用：npm ci --cache "$(pwd)/.npm-cache"
-- git push 需绕代理：git -c http.proxy= -c https.proxy= push …
-- Obsidian 设置页是声明式 API：不要改回 display()。
-- 不要自行提交/推送，先让用户确认。
+- npm ci 若 EPERM：npm ci --cache "$(pwd)/.npm-cache"
+- 真实 vault 部署：Knowledge_Inbox1/.obsidian/plugins/deepharness/（UI/生成逻辑改动后需重新构建覆盖，并在 Obsidian 里禁用再启用插件）
+- 不要自行 push；提交前先让用户确认。
 """
