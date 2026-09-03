@@ -1,8 +1,36 @@
 import { App, PluginSettingTab, Setting, type SettingDefinitionItem, type SettingDefinitionRender } from 'obsidian';
+import * as fs from 'fs';
+import * as path from 'path';
 import type DshPlugin from './main';
 import { t, Locale } from './i18n';
 import { DshRunner } from './dsh-runner';
 import { FolderSuggestModal } from './modals';
+
+/** Return an error message when a directory cannot be created/written. */
+function checkWritableDir(dir: string): string | null {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, `.deepharness-write-test-${Date.now()}`);
+    fs.writeFileSync(probe, 'ok', 'utf8');
+    fs.rmSync(probe, { force: true });
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+}
+
+/** Return an error message when an existing file cannot be opened for writing.
+ *  A missing settings.yaml is allowed if its parent directory is writable. */
+function checkWritableFile(file: string): string | null {
+  try {
+    if (!fs.existsSync(file)) return checkWritableDir(path.dirname(file));
+    const fd = fs.openSync(file, 'r+');
+    fs.closeSync(fd);
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+}
 
 export interface DshSettings {
   dshBin: string;
@@ -359,7 +387,57 @@ export class DshSettingTab extends PluginSettingTab {
                   const nodeLine = setting.settingEl.createEl('p', { cls: 'dsh-check-fail' });
                   nodeLine.setText(t('settings.checkNoNode'));
                 }
+                    // on click: check writable plugin paths
+
+
+                    const vaultRoot = this.plugin.getVaultRoot();
+                    const configDir = this.plugin.app.vault.configDir;
+                    const generatedDir = path.join(vaultRoot, configDir, 'plugins', 'deepharness', 'generated');
+                    const pluginHomeDir = path.join(vaultRoot, configDir, 'plugins', 'deepharness', 'dsh-home');
+                    const settingsYaml = path.join(pluginHomeDir, 'settings.yaml');
+                    const writeChecks: Array<{ path: string; isFile: boolean; label: string }> = [
+                      { path: generatedDir, isFile: false, label: t('settings.check.generatedDir') },
+                      { path: pluginHomeDir, isFile: false, label: t('settings.check.dshHomeDir') },
+                      { path: settingsYaml, isFile: true, label: t('settings.check.settingsYaml') },
+                    ];
+                    for (const check of writeChecks) {
+                      const error = check.isFile ? checkWritableFile(check.path) : checkWritableDir(check.path);
+                      const checkLine = setting.settingEl.createEl('p', {
+                        cls: error ? 'dsh-check-fail' : 'dsh-check-ok',
+                      });
+                      const display = `${check.path} (${check.label})`;
+                      checkLine.setText(error
+                        ? t('settings.check.writableFail', { path: display, message: error })
+                        : t('settings.check.writableOk', { path: display }));
+                    }
+
               }));
+
+                  /* TODO: remove stale diagnostic copy below when this block is cleaned up
+
+                  // keep only the onClick write check above
+                  const configDir = this.plugin.app.vault.configDir;
+                  const generatedDir = path.join(vaultRoot, configDir, 'plugins', 'deepharness', 'generated');
+                  const pluginHomeDir = path.join(vaultRoot, configDir, 'plugins', 'deepharness', 'dsh-home');
+                  const settingsYaml = path.join(pluginHomeDir, 'settings.yaml');
+                  const writeChecks: Array<{ path: string; isFile: boolean; label: string }> = [
+                    { path: generatedDir, isFile: false, label: t('settings.check.generatedDir') },
+                    { path: pluginHomeDir, isFile: false, label: t('settings.check.dshHomeDir') },
+                    { path: settingsYaml, isFile: true, label: t('settings.check.settingsYaml') },
+                  ];
+                  for (const check of writeChecks) {
+                    const error = check.isFile ? checkWritableFile(check.path) : checkWritableDir(check.path);
+                    const checkLine = setting.settingEl.createEl('p', {
+                      cls: error ? 'dsh-check-fail' : 'dsh-check-ok',
+                    });
+                    const display = `${check.path} (${check.label})`;
+                    checkLine.setText(error
+                      ? t('settings.check.writableFail', { path: display, message: error })
+                      : t('settings.check.writableOk', { path: display }));
+                  }
+                  */
+
+
           }),
 
           {
