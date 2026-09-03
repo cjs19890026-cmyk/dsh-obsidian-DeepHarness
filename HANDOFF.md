@@ -18,7 +18,19 @@
 
 ## 当前交接重点：第一/二阶段已完成，下面为剩余任务
 
-### 最近交接摘要（P2-D API Key 明文存储风险提示，2026-09-03，未提交）
+### 最近交接摘要（生成文件原子写，2026-09-03，已提交 3752f5b，未推送）
+- 已完成：**生成文件原子写**（P2-G / 剩余任务“下一批低风险代码修复”）。
+- 改动文件：
+  - src/dsh-runner.ts：新增模块级 `writeFileAtomicSync(file, content)`（同目录 tmp + rename，参考 `HistoryStore.save`），并把以下写点全部改为原子写：
+    - `ensurePluginDshHome`：dsh-home/settings.yaml
+    - `ensureVaultPatch`：generated/vault.yml（创建与重新生成两处）、vault.yml.bak、stream-relay.js、stream.yml
+    - `ensureSkillDirsPatch`：generated/skill-dirs.yml
+  - src/dsh-runner.test.ts：+3 测试（三个 ensure* 函数各自写入后目录内无 *.tmp 残留，且目标文件内容正确）。
+- 说明：`ensureMemoryFile` / obsidian-skill 写入不在本批范围（任务只列三个 ensure*）；父目录 mkdir/chmod 逻辑未动；无用户可见文案、无协议/路径约定改动。
+- 验证基线：npm test = 111 passed / 2 skipped（原 108 + 3），npx tsc --noEmit、npm run build、npx eslint src/*.ts（0 errors）全部通过。
+- 已提交（hash：`3752f5b`），尚未推送。
+
+### 最近交接摘要（P2-D API Key 明文存储风险提示，2026-09-03，已提交 ad61a92，未推送）
 - 已完成：**P2-D 设置页 API Key 明文存储风险提示**（不做 keychain——见下方评估结论）。
 - 改动文件：
   - src/i18n/index.ts：新增 `settings.apiKey.warning` key，en/zh 成对。
@@ -26,7 +38,7 @@
   - styles.css：新增 `.dsh-setting-warning`（颜色 `var(--text-warning, #d29922)`）。
 - keychain 评估结论：当前不改用 keychain。原因：Obsidian 插件（Electron 渲染进程）无法直接调系统钥匙串，需 spawn `security`（macOS）/ Credential Manager（Windows）/ libsecret（Linux）等外部工具，三平台行为与失败模式不同，且 key 会随 vault/插件 data.json 同步，迁移成本高、收益有限；本轮按 P2-D 原方案落地「设置描述 + 风险提示」。
 - 验证基线：npm test = 108 passed / 2 skipped，npx tsc --noEmit、npm run build、npx eslint src/*.ts（0 errors）全部通过。
-- 尚未提交/推送，等用户确认。
+- 已提交（hash：`ad61a92`），尚未推送。
 
 ### 最近交接摘要（子进程 env 白名单，2026-09-03，已提交 bf9915d，未推送）
 - 已完成：**子进程环境变量白名单**（P2-C / 剩余任务“下一批低风险代码修复”第 2 条）。
@@ -73,7 +85,7 @@
 - [x] `DshClient` 依赖注入 `spawn` / `setTimeout` / `clearTimeout`，替代当前测试里的 `window` shim，并补 fake spawn 参数/env/error 测试（提交 hash：`0427336`）
 - [x] 子进程环境变量白名单：不再把整个 `process.env` 传给 dsh 子进程，只保留必要项和插件注入项（提交 hash：`bf9915d`；未推送）
 - [x] P2-D：设置页补 API Key 明文存储风险提示；keychain 经评估暂不引入（settings.apiKey.warning + .dsh-setting-warning）
-- [ ] 生成文件原子写：`ensurePluginDshHome` / `ensureVaultPatch` / `ensureSkillDirsPatch` 改为 tmp + rename，参考 `HistoryStore.save`
+- [x] 生成文件原子写：`ensurePluginDshHome` / `ensureVaultPatch` / `ensureSkillDirsPatch` 改为 tmp + rename，参考 `HistoryStore.save`（提交 hash：`3752f5b`；未推送）
 - [ ] `HistoryStore.titleFromTurn` 默认标题走 `t('chat.newSession')`，去掉硬编码中文 `'新会话'`
 - [ ] `linkifyAnswer` 缓存 vault 文件/别名列表，并监听 vault 变更失效，避免每次回答全库扫描
 - [ ] `scanSkills` 缓存或异步化，避免每次打开面板/触发建议时同步读盘
@@ -96,7 +108,7 @@
 
 - 分支与 git：
   - 当前分支 `dsh-obsidian-deepharness-new-architecture` 已推送到远程同名分支。
-  - 最近提交：`bf9915d feat(dsh-client): whitelist child process env (DSH_ENV_ALLOWLIST + buildDshEnv)`（未推送）
+  - 最近提交：`3752f5b feat(dsh-runner): write generated files atomically (tmp + rename)`（bf9915d / ad61a92 / 3752f5b 均未推送）
   - 若需要合并主线 / PR / push，由用户决定。
 - 本地验证：
   - `npm test`、`npx tsc --noEmit`、`npm run build` 应全部通过。
@@ -179,7 +191,7 @@
 ### P2-D API key 明文存储（状态：已完成）
 - [x] `settings.apiKey` 明文存在插件 `data.json`（vault 内，随 vault 同步/备份）。
 - [x] 设置页在 API Key 项下方显示明文存储风险提示（`settings.apiKey.warning`，en/zh；有 key 时显示，输入时实时显隐）。
-- [x] keychain 评估：暂不引入。Obsidian 插件（Electron 渲染进程）不能直接调系统钥匙串，需 spawn security / Credential Manager / libsecret 等平台工具，行为与失败模式三平台各异，且 key 随 data.json 同步迁移成本高；维持「描述 + 风险提示」，留空即复用桌面 ~/.dsh 凭据。
+- [x] keychain 评估：暂不引入。Obsidian 插件（Electron 渲染进程）不能直接调系统钥匙串，需 spawn security / Credential Manager / libsecret 等平台工具，行为与失败模式三平台各异，且 key 随 data.json 同步迁移成本高；维持「描述 + 风险提示」，留空即复用桌面 ~/.dsh 凭据。提交 hash：`ad61a92`，未推送。
 
 ### P2-E opencode-go fallback 缺少 vision-exp 模型定义（状态：已完成）
 - [x] `OPENCODE_GO_PROVIDER_FALLBACK` 已补齐 `deepseek-v4-flash-vision-exp`。
@@ -190,9 +202,9 @@
 - [x] 绝对路径 / `../` 越界项会被拒绝。
 - [x] 设置页新增 `FolderSuggestModal`，降低用户手输越界路径概率。
 
-### P2-G 生成文件写入非原子
-- `ensureVaultPatch`、`ensureSkillDirsPatch`、`ensurePluginDshHome` 直接 `fs.writeFileSync`。
-- 修复：统一 tmp + rename 原子写（参考 `HistoryStore.save`）。
+### P2-G 生成文件写入非原子（状态：已完成）
+- [x] `ensureVaultPatch`、`ensureSkillDirsPatch`、`ensurePluginDshHome` 原来直接 `fs.writeFileSync`。
+- [x] 修复：dsh-runner.ts 新增 `writeFileAtomicSync`（同目录 tmp + rename），settings.yaml / vault.yml / vault.yml.bak / stream-relay.js / stream.yml / skill-dirs.yml 全部改原子写；提交 hash：`3752f5b`，未推送。
 
 ### P2-H linkifyAnswer 每次扫描全库
 - `chat-view.ts` 686-708 行每次回答都 `getMarkdownFiles()` 并读 metadataCache。
@@ -433,8 +445,8 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 1. `package.json` 固定 `obsidian` 版本并同步 lockfile。
 2. [x] `DshClient` 可注入 `spawn` / timer，测试不再依赖 `window` shim。（提交 hash：`0427336`）
 3. [x] 子进程 env 白名单化（`src/dsh-client.ts` 的 `DSH_ENV_ALLOWLIST` + `buildDshEnv`，+8 测试）。
-4. [x] API Key 存储风险有提示（P2-D：settings.apiKey.warning 风险提示，未提交）。
-5. 生成文件统一原子写。
+4. [x] API Key 存储风险有提示（P2-D：settings.apiKey.warning 风险提示；提交 hash：`ad61a92`）。
+5. [x] 生成文件统一原子写（`writeFileAtomicSync`，settings.yaml / vault.yml(.bak) / stream-relay.js / stream.yml / skill-dirs.yml；提交 hash：`3752f5b`）。
 6. `HistoryStore` 默认标题走 i18n。
 7. linkify / skill 扫描有缓存或异步化。
 8. 运行中关闭面板/卸载时状态与部分轮次处理完整。
@@ -449,7 +461,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 | 文件 | 当前角色 / 剩余关注点 |
 | --- | --- |
 | `src/chat-view.ts` | 仍是大文件；已使用 `parseDshEventLine`；后续才拆结构 |
-| `src/dsh-runner.ts` | 仍是大文件；已加入 `resolveVaultRelativeDir`、opencode fallback；后续才拆结构 |
+| `src/dsh-runner.ts` | 仍是大文件；已加入 `resolveVaultRelativeDir`、opencode fallback、`writeFileAtomicSync` 原子写；后续才拆结构 |
 | `src/dsh-client.ts` | `killReason`、依赖注入、子进程 env 白名单（`DSH_ENV_ALLOWLIST` + `buildDshEnv` + `opts.env`）均已完成 |
 | `src/pure.ts` | 已有 `parseDshEventLine`、`resolveVaultRelativeDir` 等纯函数 |
 | `src/settings.ts` | 已增加可写性诊断、文件夹选择器、API Key 明文存储风险提示（`settings.apiKey.warning`）；剩余 string→union 收紧 |

@@ -186,3 +186,82 @@ describe('DshRunner.buildTask and workdir', () => {
     });
   });
 });
+
+describe('DshRunner generated-file writes are atomic', () => {
+  let dir: string;
+  let vaultRoot: string;
+  let settings: DshSettings;
+  let runner: DshRunner;
+  const generatedRel = path.join('.obsidian', 'plugins', 'deepharness', 'generated');
+
+  function makeSettings(): DshSettings {
+    return {
+      dshBin: '',
+      nodeBin: '',
+      dshHome: '~/.dsh',
+      workdir: '',
+      timeoutSec: 600,
+      memoryEnabled: true,
+      language: 'auto',
+      customPersona: '',
+      toolExecutionMode: '',
+      model: 'deepseek-v4-flash',
+      reasoningEffort: 'high',
+      permissionMode: 'workspace-write',
+      showThinking: true,
+      showTools: true,
+      historyLimit: 50,
+      obsidianSkill: true,
+      extraSkillDirs: '',
+      apiKey: '',
+      provider: 'deepseek-official',
+    };
+  }
+
+  function listTmpFiles(folder: string): string[] {
+    if (!fs.existsSync(folder)) return [];
+    return fs.readdirSync(folder).filter((f) => f.endsWith('.tmp'));
+  }
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-runner-atomic-'));
+    vaultRoot = path.join(dir, 'vault');
+    fs.mkdirSync(path.join(vaultRoot, 'Skills'), { recursive: true });
+    settings = makeSettings();
+    runner = new DshRunner(settings, '.obsidian');
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('ensureSkillDirsPatch leaves no .tmp file behind', () => {
+    settings.extraSkillDirs = 'Skills';
+    const file = runner.ensureSkillDirsPatch(vaultRoot);
+    expect(file).not.toBeNull();
+    expect(fs.existsSync(file as string)).toBe(true);
+    expect(listTmpFiles(path.join(vaultRoot, generatedRel))).toEqual([]);
+  });
+
+  it('ensureVaultPatch writes persona and stream patches atomically', async () => {
+    const res = await runner.ensureVaultPatch(vaultRoot);
+    const generated = path.join(vaultRoot, generatedRel);
+    expect(res.persona).not.toBeNull();
+    expect(res.think).not.toBeNull();
+    expect(fs.existsSync(path.join(generated, 'vault.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(generated, 'stream.yml'))).toBe(true);
+    expect(fs.existsSync(path.join(generated, 'stream-relay.js'))).toBe(true);
+    expect(listTmpFiles(generated)).toEqual([]);
+    const personaText = fs.readFileSync(path.join(generated, 'vault.yml'), 'utf8');
+    expect(personaText).toContain('deepharness-persona-v');
+  });
+
+  it('ensurePluginDshHome writes settings.yaml atomically', () => {
+    const home = runner.ensurePluginDshHome(vaultRoot, { model: 'deepseek-v4-pro', effort: 'max' });
+    expect(home).not.toBeNull();
+    const yaml = fs.readFileSync(path.join(home as string, 'settings.yaml'), 'utf8');
+    expect(yaml).toContain('model: deepseek-v4-pro');
+    expect(yaml).toContain('reasoningEffort: max');
+    expect(listTmpFiles(home as string)).toEqual([]);
+  });
+});

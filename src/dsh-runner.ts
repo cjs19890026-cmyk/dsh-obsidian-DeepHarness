@@ -43,6 +43,19 @@ const IS_WINDOWS = process.platform === 'win32';
 
 /** `where dsh` / `which dsh` — the PATH lookup command for this platform. */
 const WHICH_CMD = IS_WINDOWS ? 'where' : 'which';
+/**
+ * Write a text file atomically (tmp file in the same directory + rename) so a
+ * crash or interruption never leaves a half-written file that dsh would parse
+ * on the next run. Mirrors HistoryStore.save. The parent directory must exist.
+ * A leftover *.tmp from a failed write is harmless and gets overwritten on the
+ * next run.
+ */
+function writeFileAtomicSync(file: string, content: string): void {
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, content, 'utf8');
+  fs.renameSync(tmp, file);
+}
+
 
 /** Extra common Windows locations for the dsh CLI (npm global prefix). */
 function windowsDshCandidates(): string[] {
@@ -431,7 +444,7 @@ export class DshRunner {
         `  reasoningEffort: ${sel.effort}`,
         '',
       );
-      fs.writeFileSync(path.join(base, 'settings.yaml'), settingsLines.join('\n'), 'utf8');
+      writeFileAtomicSync(path.join(base, 'settings.yaml'), settingsLines.join('\n'));
       return base;
     } catch {
       return null;
@@ -553,7 +566,7 @@ export class DshRunner {
         ...dirs.map((d) => `      - ${JSON.stringify(d)}`),
         '',
       ].join('\n');
-      fs.writeFileSync(file, yml, 'utf8');
+      writeFileAtomicSync(file, yml);
       return file;
     } catch {
       return null;
@@ -589,7 +602,7 @@ export class DshRunner {
     try {
       const marker = this.personaMarker();
       if (!fs.existsSync(personaFile)) {
-        fs.writeFileSync(personaFile, this.renderPersonaYaml(this.buildPersonaLines(), marker), 'utf8');
+        writeFileAtomicSync(personaFile, this.renderPersonaYaml(this.buildPersonaLines(), marker));
       } else {
         const existing = fs.readFileSync(personaFile, 'utf8');
         const custom = this.settings.customPersona.trim();
@@ -599,9 +612,9 @@ export class DshRunner {
           // .bak, then regenerate in the current locale.
           const legacy = this.renderLegacyPersonaYaml();
           if (existing.trim() !== legacy.trim()) {
-            try { fs.writeFileSync(`${personaFile}.bak`, existing, 'utf8'); } catch { /* ignore */ }
+            try { writeFileAtomicSync(`${personaFile}.bak`, existing); } catch { /* ignore */ }
           }
-          fs.writeFileSync(personaFile, this.renderPersonaYaml(this.buildPersonaLines(), marker), 'utf8');
+          writeFileAtomicSync(personaFile, this.renderPersonaYaml(this.buildPersonaLines(), marker));
         }
       }
       persona = personaFile;
@@ -614,11 +627,11 @@ export class DshRunner {
     const thinkJs = path.join(dir, 'stream-relay.js');
     const thinkYml = path.join(dir, 'stream.yml');
     try {
-      fs.writeFileSync(thinkJs, STREAM_RELAY_SRC, 'utf8');
+      writeFileAtomicSync(thinkJs, STREAM_RELAY_SRC);
       // `name` must be a file:// URL: Node's ESM loader rejects bare Windows
       // paths ("D:\\...") as plugin import specifiers
       // (ERR_UNSUPPORTED_ESM_URL_SCHEME) — see streamRelayPatchYaml.
-      fs.writeFileSync(thinkYml, streamRelayPatchYaml(thinkJs), 'utf8');
+      writeFileAtomicSync(thinkYml, streamRelayPatchYaml(thinkJs));
       think = thinkYml;
     } catch {
       think = null;
