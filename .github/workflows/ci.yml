@@ -1,0 +1,31 @@
+name: CI
+
+# Run the same safety checks on ordinary branch pushes (not just tagged
+# releases): install dependencies, run the full test suite, and build.
+on:
+  push:
+    branches:
+      - '**'
+
+jobs:
+  test-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Use Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: "22.x"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build plugin
+        run: npm run build
