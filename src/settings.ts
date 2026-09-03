@@ -194,6 +194,14 @@ export class DshSettingTab extends PluginSettingTab {
           }),
 
           render(t('settings.apiKey.name'), t('settings.apiKey.desc'), (setting) => {
+            // P2-D: surface the plaintext-storage risk while a plugin key is set
+            // (data.json lives inside the vault, so it syncs with the vault).
+            const warningEl = setting.descEl.createDiv({ cls: 'dsh-setting-warning' });
+            warningEl.setText(t('settings.apiKey.warning'));
+            const applyWarning = (): void => {
+              warningEl.style.display = s.apiKey ? '' : 'none';
+            };
+            applyWarning();
             setting.addText((text) => {
               text
                 .setPlaceholder(t('settings.apiKey.placeholder'))
@@ -201,6 +209,7 @@ export class DshSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                   s.apiKey = value.trim();
                   await this.plugin.saveSettings();
+                  applyWarning();
                 });
               text.inputEl.type = 'password';
               text.inputEl.autocomplete = 'off';

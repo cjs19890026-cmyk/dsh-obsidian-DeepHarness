@@ -18,13 +18,23 @@
 
 ## 当前交接重点：第一/二阶段已完成，下面为剩余任务
 
-### 最近交接摘要（子进程 env 白名单，2026-09-03，未提交）
+### 最近交接摘要（P2-D API Key 明文存储风险提示，2026-09-03，未提交）
+- 已完成：**P2-D 设置页 API Key 明文存储风险提示**（不做 keychain——见下方评估结论）。
+- 改动文件：
+  - src/i18n/index.ts：新增 `settings.apiKey.warning` key，en/zh 成对。
+  - src/settings.ts：API Key 设置项在其 desc 下按需显示 `.dsh-setting-warning` 警告行（有 key 才显示；输入时实时显隐，不清空则不打扰）。
+  - styles.css：新增 `.dsh-setting-warning`（颜色 `var(--text-warning, #d29922)`）。
+- keychain 评估结论：当前不改用 keychain。原因：Obsidian 插件（Electron 渲染进程）无法直接调系统钥匙串，需 spawn `security`（macOS）/ Credential Manager（Windows）/ libsecret（Linux）等外部工具，三平台行为与失败模式不同，且 key 会随 vault/插件 data.json 同步，迁移成本高、收益有限；本轮按 P2-D 原方案落地「设置描述 + 风险提示」。
+- 验证基线：npm test = 108 passed / 2 skipped，npx tsc --noEmit、npm run build、npx eslint src/*.ts（0 errors）全部通过。
+- 尚未提交/推送，等用户确认。
+
+### 最近交接摘要（子进程 env 白名单，2026-09-03，已提交 bf9915d，未推送）
 - 已完成：**子进程环境变量白名单**（P2-C / 剩余任务“下一批低风险代码修复”第 2 条）。
 - 改动文件：
   - src/dsh-client.ts：新增导出 DSH_ENV_ALLOWLIST（继承白名单）+ buildDshEnv(opts, sourceEnv)（分层：白名单继承 → opts.env 显式注入 → 插件注入项 DSH_HOME / API key / DSH_TOOLS_MODE / DSH_PERMISSION_MODE → nodeBin 目录前置 PATH）。DshClient.run 不再把整个 process.env 传给 dsh 子进程，只构造白名单 + 注入项；顺带修正了 spawnFn / startedAt 的缩进。
   - src/dsh-client.test.ts：+8 测试 = buildDshEnv 纯函数 7 条（白名单继承 / 空 env / opts.env 合并 / 默认 provider 的 DEEPSEEK_API_KEY / 插件项覆盖 / 带 source PATH 的 nodeBin PATH 前置 / 无 source PATH 时的 fallback）+ fake spawn env 隔离 1 条（断言 spawn env 只含白名单 ∪ 插件注入项，不泄漏非白名单 process.env 键）。
 - 验证基线：npm test = 108 passed / 2 skipped（原 100 + 8），npx tsc --noEmit、npm run build、npx eslint src/*.ts（0 errors）全部通过。
-- 尚未提交/推送，等用户确认。
+- 已提交（hash：`bf9915d`），尚未推送。
 - 无 i18n 文案、无 DLEVENT / 生成路径 / dsh-home 约定改动；未拆 chat-view.ts / dsh-runner.ts。
 
 ### 最近交接摘要（2026-09-03 已推送）
@@ -61,8 +71,8 @@
 
 #### 2. 下一批低风险代码修复（小步做，每步跑 npm test / tsc / build）
 - [x] `DshClient` 依赖注入 `spawn` / `setTimeout` / `clearTimeout`，替代当前测试里的 `window` shim，并补 fake spawn 参数/env/error 测试（提交 hash：`0427336`）
-- [x] 子进程环境变量白名单：不再把整个 `process.env` 传给 dsh 子进程，只保留必要项和插件注入项（本次完成：`DSH_ENV_ALLOWLIST` + `buildDshEnv`；未提交）
-- [ ] P2-D：设置页补 API Key 明文存储风险提示；如可行再评估 keychain
+- [x] 子进程环境变量白名单：不再把整个 `process.env` 传给 dsh 子进程，只保留必要项和插件注入项（提交 hash：`bf9915d`；未推送）
+- [x] P2-D：设置页补 API Key 明文存储风险提示；keychain 经评估暂不引入（settings.apiKey.warning + .dsh-setting-warning）
 - [ ] 生成文件原子写：`ensurePluginDshHome` / `ensureVaultPatch` / `ensureSkillDirsPatch` 改为 tmp + rename，参考 `HistoryStore.save`
 - [ ] `HistoryStore.titleFromTurn` 默认标题走 `t('chat.newSession')`，去掉硬编码中文 `'新会话'`
 - [ ] `linkifyAnswer` 缓存 vault 文件/别名列表，并监听 vault 变更失效，避免每次回答全库扫描
@@ -86,7 +96,7 @@
 
 - 分支与 git：
   - 当前分支 `dsh-obsidian-deepharness-new-architecture` 已推送到远程同名分支。
-  - 最近提交：`0427336 feat(dsh-client): inject spawn/timer dependencies and add fake spawn tests`
+  - 最近提交：`bf9915d feat(dsh-client): whitelist child process env (DSH_ENV_ALLOWLIST + buildDshEnv)`（未推送）
   - 若需要合并主线 / PR / push，由用户决定。
 - 本地验证：
   - `npm test`、`npx tsc --noEmit`、`npm run build` 应全部通过。
@@ -162,13 +172,14 @@
 - 直接 `spawn` 真实子进程。
 - 修复：构造函数或 `run` 参数注入 `spawn`、`setTimeout`、`clearTimeout`，默认取 `globalThis`。
 
-### P2-C 子进程继承完整 `process.env`
-- `DshClient.run` 98 行 `{ ...process.env }`。
-- 修复：构造白名单 env，只保留必要变量和本插件需要注入的变量。
+### P2-C 子进程继承完整 `process.env`（状态：已完成）
+- [x] `DshClient.run` 原来整份透传 `process.env`。
+- [x] 修复：`buildDshEnv` 白名单继承（`DSH_ENV_ALLOWLIST`）+ `opts.env` 显式注入 + 插件注入项；提交 hash：`bf9915d`，未推送。
 
-### P2-D API key 明文存储
-- `settings.apiKey` 明文存在插件 `data.json`。
-- 修复：至少加设置描述和风险提示；如需更高安全性再考虑 keychain。
+### P2-D API key 明文存储（状态：已完成）
+- [x] `settings.apiKey` 明文存在插件 `data.json`（vault 内，随 vault 同步/备份）。
+- [x] 设置页在 API Key 项下方显示明文存储风险提示（`settings.apiKey.warning`，en/zh；有 key 时显示，输入时实时显隐）。
+- [x] keychain 评估：暂不引入。Obsidian 插件（Electron 渲染进程）不能直接调系统钥匙串，需 spawn security / Credential Manager / libsecret 等平台工具，行为与失败模式三平台各异，且 key 随 data.json 同步迁移成本高；维持「描述 + 风险提示」，留空即复用桌面 ~/.dsh 凭据。
 
 ### P2-E opencode-go fallback 缺少 vision-exp 模型定义（状态：已完成）
 - [x] `OPENCODE_GO_PROVIDER_FALLBACK` 已补齐 `deepseek-v4-flash-vision-exp`。
@@ -422,7 +433,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 1. `package.json` 固定 `obsidian` 版本并同步 lockfile。
 2. [x] `DshClient` 可注入 `spawn` / timer，测试不再依赖 `window` shim。（提交 hash：`0427336`）
 3. [x] 子进程 env 白名单化（`src/dsh-client.ts` 的 `DSH_ENV_ALLOWLIST` + `buildDshEnv`，+8 测试）。
-4. API Key 存储风险有提示或方案（P2-D）。
+4. [x] API Key 存储风险有提示（P2-D：settings.apiKey.warning 风险提示，未提交）。
 5. 生成文件统一原子写。
 6. `HistoryStore` 默认标题走 i18n。
 7. linkify / skill 扫描有缓存或异步化。
@@ -441,7 +452,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 | `src/dsh-runner.ts` | 仍是大文件；已加入 `resolveVaultRelativeDir`、opencode fallback；后续才拆结构 |
 | `src/dsh-client.ts` | `killReason`、依赖注入、子进程 env 白名单（`DSH_ENV_ALLOWLIST` + `buildDshEnv` + `opts.env`）均已完成 |
 | `src/pure.ts` | 已有 `parseDshEventLine`、`resolveVaultRelativeDir` 等纯函数 |
-| `src/settings.ts` | 已增加可写性诊断与文件夹选择器；剩余 string→union 收紧 |
+| `src/settings.ts` | 已增加可写性诊断、文件夹选择器、API Key 明文存储风险提示（`settings.apiKey.warning`）；剩余 string→union 收紧 |
 | `src/history.ts` | 已有原子写与基础测试；剩余默认标题 i18n |
 | `package.json` | 剩余固定 `obsidian: latest` |
 | `package-lock.json` | 已同步为 `0.1.6` |
