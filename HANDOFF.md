@@ -18,6 +18,18 @@
 
 ## 当前交接重点：第一/二阶段已完成，下面为剩余任务
 
+### 最近交接摘要（P1-5 设置选项 union 化 + 加载时非法值回退，2026-09-03，已提交 2b039a1，未推送）
+- 已完成：**P1-5 `DshSettings` 选项字段收窄 + `loadSettings` 非法值回退**（剩余任务「运行生命周期与降级可见化」首条）。
+- 改动文件：
+  - src/settings.ts：新增 option 推导 union（`ProviderId` / `ModelId` / `ReasoningEffort` / `PermissionMode` / `ToolExecutionMode`，含 `TOOL_EXECUTION_MODES` 常量），`DshSettings` 的 provider / model / reasoningEffort / permissionMode / toolExecutionMode 由 string 收窄；toolMode 下拉改遍历 `TOOL_EXECUTION_MODES`（文案不变）；新增 `normalizeStoredSettings(raw)` —— 选项字段非法/非字符串值时回退 `DEFAULT_SETTINGS`，返回被修正字段列表。
+  - src/main.ts：`loadSettings` 改走 `normalizeStoredSettings`；有修正时愈合 data.json（保存一次）并在 applyLocale 后弹一次 Notice（新 i18n key `settings.storedOptionReset`）；旧 toolsMode 迁移逻辑保留且合并为单次保存；`setPermissionMode(mode: PermissionMode)` 收窄。
+  - src/chat-view.ts：`applyPermissionMode` 参数收窄为 `PermissionMode`。
+  - src/i18n/index.ts：新增 `settings.storedOptionReset`，en/zh 成对。
+  - src/settings.test.ts（新）：+6 测试（合法值保留 / 各字段非法回退 / 非字符串类型回退 / 未存储字段不报 / 非对象数据 / 结果均在选项集内）。
+- 验证基线：npm test = 118 passed / 2 skipped（原 112 + 6），npx tsc --noEmit、npm run build、npx eslint src/*.ts（0 errors）全部通过。
+- 已提交（hash：`2b039a1`），尚未推送。
+- 无 DLEVENT / 生成文件路径 / dsh-home 约定改动；未拆 chat-view.ts / dsh-runner.ts；无既有 key 文案改动。
+
 ### 最近交接摘要（HistoryStore 默认标题走 i18n，2026-09-03，已提交 84596f0，未推送）
 - 已完成：**HistoryStore 默认标题 i18n**（P2-J / 剩余任务“下一批低风险代码修复”）。
 - 改动文件：
@@ -103,7 +115,7 @@
 #### 3. 运行生命周期与降级可见化（中等风险，建议单独做，仍不拆大结构）
 - [ ] P2-K：运行中关闭面板/插件卸载时，`killReason` 与部分轮次处理完整，避免 promise settle 后仍操作 DOM
 - [ ] P1-3：让 DSH_HOME / patch / workdir 降级失败在 UI 可见（统一警告收集 + 消息内提示 + Notice）
-- [ ] P1-5：`DshSettings` 的 `model` / `reasoningEffort` / `permissionMode` / `toolExecutionMode` 改为从 option 常量推导的 union，并在 `loadSettings` 做非法值回退
+- [x] P1-5：`DshSettings` 的 `model` / `reasoningEffort` / `permissionMode` / `toolExecutionMode` 改为从 option 常量推导的 union，并在 `loadSettings` 做非法值回退
 
 #### 4. 结构拆分（高风险，最后单独安排，不混入前几批）
 - [ ] 引入 `RunController` 显式状态机
@@ -460,7 +472,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 7. linkify / skill 扫描有缓存或异步化。
 8. 运行中关闭面板/卸载时状态与部分轮次处理完整。
 9. DSH_HOME / patch / workdir 降级失败在 UI 可见。
-10. `DshSettings` 相关字段改为 union 类型并做加载校验。
+10. [x] `DshSettings` 相关字段改为 union 类型并做加载校验。
 11. 再往后才是 `RunController`、拆分 `DshRunner` / `ChatView` 等结构级目标。
 
 ---
