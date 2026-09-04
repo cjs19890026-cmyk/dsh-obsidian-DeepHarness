@@ -63,6 +63,9 @@ export class ChatView extends ItemView {
   private localeUnsub: (() => void) | null = null;
   /** P2-H: cached wikilink title index; invalidated when the vault changes. */
   private linkifyEntries: NoteTitleEntry[] | null = null;
+  /** P2-I: cached skill catalog (keyed by scanned roots); invalidated on
+   *  vault/settings changes instead of on every panel open / suggestion. */
+  private skillCache: { key: string; skills: SkillEntry[] } | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: DshPlugin) {
     super(leaf);
@@ -101,14 +104,18 @@ export class ChatView extends ItemView {
       }),
     );
 
-    // P2-H: keep the linkify title cache in sync with the vault. Marking it
-    // dirty on any vault change is cheaper than scanning the whole vault for
-    // every rendered answer; the scan happens again on the next answer.
-    const invalidateLinkifyCache = (): void => { this.linkifyEntries = null; };
-    this.registerEvent(this.app.vault.on('create', invalidateLinkifyCache));
-    this.registerEvent(this.app.vault.on('delete', invalidateLinkifyCache));
-    this.registerEvent(this.app.vault.on('rename', invalidateLinkifyCache));
-    this.registerEvent(this.app.vault.on('modify', invalidateLinkifyCache));
+    // P2-H / P2-I: keep the linkify title index and the skill catalog caches
+    // in sync with the vault. Marking them dirty on any vault change is
+    // cheaper than scanning the whole vault / skill roots on every render,
+    // panel open or "/" suggestion; the scans happen again on next use.
+    const invalidateCaches = (): void => {
+      this.linkifyEntries = null;
+      this.skillCache = null;
+    };
+    this.registerEvent(this.app.vault.on('create', invalidateCaches));
+    this.registerEvent(this.app.vault.on('delete', invalidateCaches));
+    this.registerEvent(this.app.vault.on('rename', invalidateCaches));
+    this.registerEvent(this.app.vault.on('modify', invalidateCaches));
 
     // Header
     const header = container.createDiv({ cls: 'dsh-header' });
@@ -208,7 +215,12 @@ export class ChatView extends ItemView {
     this.updateTriggerLabels();
     // Reflect settings-tab changes (model / effort / permission) into the
     // trigger labels, which otherwise only refresh from our own menus.
-    this.settingsUnsub = this.plugin.onSettingsChange(() => this.updateTriggerLabels());
+    this.settingsUnsub = this.plugin.onSettingsChange(() => {
+      // extraSkillDirs feeds the skill catalog — drop the cache so the next
+      // panel open / suggestion rescans with the updated roots.
+      this.skillCache = null;
+      this.updateTriggerLabels();
+    });
     // Reflect language changes into every locale-dependent string in place,
     // so the panel refreshes without being closed/reopened.
     this.localeUnsub = this.plugin.onLocaleChange(() => this.refreshLocaleStrings());
@@ -1152,8 +1164,7 @@ export class ChatView extends ItemView {
   }
 
   /** Roots mirroring DSH discovery + user-configured extra directories. */
-  private scanSkills(): SkillEntry[] {
-    const vaultRoot = this.plugin.getVaultRoot();
+  private scanRoots(vaultRoot: string): ScanRoot[] {
     const roots: ScanRoot[] = [
       { dir: path.join(vaultRoot, '.dsh', 'skills'), source: 'project' },
       { dir: path.join(vaultRoot, '.agents', 'skills'), source: 'project' },
@@ -1165,6 +1176,21 @@ export class ChatView extends ItemView {
       const dir = resolveVaultRelativeDir(vaultRoot, rel);
       if (dir) roots.push({ dir, source: 'extra' });
     }
-    return scanSkillRoots(roots);
+    return roots;
+  }
+
+  /**
+   * Skill catalog for the 🔧 panel and the "/" suggestions. Cached (P2-I):
+   * the sync readdirSync/readFileSync scan only reruns after a vault change
+   * or an extraSkillDirs edit, not on every panel open / popup trigger.
+   */
+  private scanSkills(): SkillEntry[] {
+    const vaultRoot = this.plugin.getVaultRoot();
+    // Key covers every input of the scan; cheap to compute per call.
+    const key = `${vaultRoot}\u0000${this.plugin.settings.extraSkillDirs.trim()}`;
+    if (this.skillCache && this.skillCache.key === key) return this.skillCache.skills;
+    const skills = scanSkillRoots(this.scanRoots(vaultRoot));
+    this.skillCache = { key, skills };
+    return skills;
   }
 }
