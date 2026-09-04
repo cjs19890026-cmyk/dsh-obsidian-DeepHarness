@@ -16,7 +16,23 @@
 
 ---
 
-## 当前交接重点：第一/二阶段已完成，下面为剩余任务
+## 当前交接重点：第三阶段低风险项已清零（P2-K / P1-3），下面为剩余任务
+
+### 最近交接摘要（P2-K 运行生命周期 + P1-3 降级失败可见化，2026-09-04，本地完成未提交）
+- 已完成：剩余任务第 3 节「运行生命周期与降级可见化」全部 2 条（P2-K、P1-3）。改动全部在本地工作区、**未提交**（commit 与 push 均须用户确认）。
+- P2-K（运行中关闭面板/插件卸载时 killReason 与部分轮次处理完整，避免 promise settle 后仍操作 DOM）：
+  - src/chat-view.ts：新增 `closed` 标志与幂等 `teardown()`（onClose 与新公开方法 `shutdownForUnload()` 共用）；teardown 会 abort 运行（killReason 'user'）+ dispose client + 关闭浮动面板/解绑监听/清 status timer。sendMessage 在每个 await 边界（detectBin / detectNode / ensureVaultPatch 后）检查 `closed`,探测期关闭则直接返回、不 spawn；`client.run` settle 后 `closed` 分支只调用 `savePartialTurn()` 不再碰 DOM；`handleStreamLine` 顶部与 catch/finally 均加守卫。
+  - 部分轮次决定：**有内容才保存**。新纯函数 `partialTurnAnswer`（src/pure.ts）：stdout 非 DLEVENT 部分文本 → 存为 answer；只有 thinking/tools → 用新 key `chat.runInterrupted` 标记为 answer；全空 → 不落盘（与手动停止不写历史一致）。写入走 `history.addTurn`（内部同步写，卸载不丢）。
+  - src/main.ts：插件新增 `chatViews` 注册表（ChatView 构造时 `registerChatView`，teardown 时注销）；`onunload()` 先遍历各视图 `shutdownForUnload()`（Obsidian 可能不调 onClose），再 `DshClient.disposeAll()` + `endSession()`。
+- P1-3（DSH_HOME / patch / workdir 降级失败在 UI 可见：统一警告收集 + 消息内提示 + Notice）：
+  - src/dsh-runner.ts：新增导出 `PreparationIssue { level; code; message(已 i18n) }`；`ensurePluginDshHome`(code `dsh-home`) / `ensureVaultPatch`(`patch-dir`/`patch-persona`/`patch-stream`) / `ensureSkillDirsPatch`(`skill-dirs-rejected` 非空越界项 / `skill-dirs-write`) / `ensureObsidianSkill`(`obsidian-skill`) / `ensureMemoryFile`(`memory-file`) / `workdir`(`workdir-outside`/`workdir-mkdir`) 均增加**可选** `issues?: PreparationIssue[]` 收集器参数,降级时 push;合法空态/成功不 push,happy path 行为零变化。方法主返回类型不变,既有测试不受影响。
+  - src/chat-view.ts：sendMessage 建 `prepIssues` 收集器传入各准备步骤;有降级时 `renderPreparationIssues()` 以一条系统消息逐条列出 + 一次 Notice(新 key `chat.degrade.title`/`notice`);`workdir` 提取为变量并传入 `client.run` 的 cwd。
+  - src/i18n/index.ts：新增 `chat.degrade.*` 共 12 个 key + `chat.runInterrupted`,en/zh 成对;未改动任何既有 key。
+  - 测试：src/dsh-runner.test.ts +12(各降级路径 code 断言 + 合法空态/设置禁用静默);src/pure.test.ts +4(partialTurnAnswer)。无 window shim。
+- 验证基线：npm test = **137 passed / 2 skipped**(原 121 + 16),`npx tsc --noEmit`、`npm run build`、`npx eslint src/*.ts`(0 errors,12 条 warning 均为既有)全部通过。
+- 红线遵守:DLEVENT 线协议、生成文件路径与 dsh-home 约定、既有 i18n key 文案零改动;生成文件仍走 writeFileAtomicSync;env 白名单 / 1.13 声明式设置页 / onunload 同步均未动;未拆 chat-view / dsh-runner。
+- git 提示：本地当前领先 origin 1 个 commit（`02afd90` 上一轮 docs(handoff) 收尾提交，仅改 HANDOFF.md，未推送）。本轮两个改动批次尚未提交。
+- 提交记录（用户确认后）：本轮 P2-K + P1-3 合并为单个提交 `55b8e17 fix(run): complete mid-run teardown handling and surface degraded setup`（7 文件，+444/−27）；本 docs(handoff) 提交紧随其后，与 `02afd90` 一起 push origin/dsh-obsidian-deepharness-new-architecture。
 
 ### 最近交接摘要（本轮收尾：P1-5 / P2-H / P2-I / 发布前必办 完成并已推送，2026-09-03，HEAD 78134a2 与远程同步）
 - 本轮会话完成 4 个批次并**全部推送**到 origin/dsh-obsidian-deepharness-new-architecture（`31b06d0..78134a2`，共 9 个提交，经 `git -c http.proxy= -c https.proxy= push`，无 ahead/behind）：
@@ -154,8 +170,8 @@
 - [x] `settings.ts` 中 E 项新增代码的缩进/空行整理（功能正常，可读性一般）；i18n 新 key 缩进已对齐
 
 #### 3. 运行生命周期与降级可见化（中等风险，建议单独做，仍不拆大结构）
-- [ ] P2-K：运行中关闭面板/插件卸载时，`killReason` 与部分轮次处理完整，避免 promise settle 后仍操作 DOM
-- [ ] P1-3：让 DSH_HOME / patch / workdir 降级失败在 UI 可见（统一警告收集 + 消息内提示 + Notice）
+- [x] P2-K：运行中关闭面板/插件卸载时，`killReason` 与部分轮次处理完整，避免 promise settle 后仍操作 DOM（2026-09-04 完成，未提交：closed 标志 + teardown/shutdownForUnload + 各 await 边界守卫 + savePartialTurn；部分轮次有内容才保存）
+- [x] P1-3：让 DSH_HOME / patch / workdir 降级失败在 UI 可见（统一警告收集 + 消息内提示 + Notice）（2026-09-04 完成，未提交：PreparationIssue 收集器 + renderPreparationIssues + chat.degrade.* i18n）
 - [x] P1-5：`DshSettings` 的 `model` / `reasoningEffort` / `permissionMode` / `toolExecutionMode` 改为从 option 常量推导的 union，并在 `loadSettings` 做非法值回退
 
 #### 4. 结构拆分（高风险，最后单独安排，不混入前几批）
@@ -511,8 +527,8 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 5. [x] 生成文件统一原子写（`writeFileAtomicSync`，settings.yaml / vault.yml(.bak) / stream-relay.js / stream.yml / skill-dirs.yml；提交 hash：`c68aa17`）。
 6. [x] `HistoryStore` 默认标题走 i18n（`titleFromTurn` 兜底用 `t('chat.newSession')`；提交 hash：`84596f0`）。
 7. [x] linkifyAnswer 有缓存（P2-H，提交 `7d453d3`，未推送）；scanSkills 有缓存（P2-I，提交 `8d085b6`，未推送）。
-8. 运行中关闭面板/卸载时状态与部分轮次处理完整。
-9. DSH_HOME / patch / workdir 降级失败在 UI 可见。
+8. [x] 运行中关闭面板/卸载时状态与部分轮次处理完整。（P2-K，2026-09-04 完成，未提交）
+9. [x] DSH_HOME / patch / workdir 降级失败在 UI 可见。（P1-3，2026-09-04 完成，未提交：PreparationIssue 收集 + 消息内列表 + Notice）
 10. [x] `DshSettings` 相关字段改为 union 类型并做加载校验。
 11. 再往后才是 `RunController`、拆分 `DshRunner` / `ChatView` 等结构级目标。
 
@@ -566,12 +582,11 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 3. 如本地有 MAINTENANCE.md，再看其顶部维护摘要
 
 当前状态：
-- 分支 dsh-obsidian-deepharness-new-architecture 已与远程同步（HEAD `78134a2`；本轮 9 个提交均已 push）。push 仍需绕代理：git -c http.proxy= -c https.proxy= push origin dsh-obsidian-deepharness-new-architecture；提交与 push 前都先让用户确认。
-- 已完成并推送：P1-5 设置选项 union 化 + 加载回退（`2b039a1`）；P2-H linkifyAnswer 缓存（`7d453d3`）；P2-I scanSkills 缓存（`8d085b6`）；发布前必办（pin obsidian `1.13.1` `6e7f257`、Actions v4 + tag↔manifest 校验 `dddb738`）。剩余任务第 1、2 节已清零。验证基线：npm test = 121 passed / 2 skipped，tsc / build / eslint 0 errors。
+- 分支 dsh-obsidian-deepharness-new-architecture 本地领先远程 1 个 commit（`02afd90` 上一轮 docs(handoff) 收尾提交，仅改 HANDOFF.md）。push 仍需绕代理：git -c http.proxy= -c https.proxy= push origin dsh-obsidian-deepharness-new-architecture；提交与 push 前都先让用户确认。
+- 最近完成（P2-K + P1-3，本地工作区、**未提交**）：剩余任务第 3 节已清零，见顶部交接摘要。其余已完成并推送的批次：P1-5 设置选项 union 化 + 加载回退（`2b039a1`）；P2-H linkifyAnswer 缓存（`7d453d3`）；P2-I scanSkills 缓存（`8d085b6`）；发布前必办（pin obsidian `1.13.1` `6e7f257`、Actions v4 + tag↔manifest 校验 `dddb738`）。剩余任务第 1、2 节已清零。验证基线：npm test = 137 passed / 2 skipped，tsc / build / eslint 0 errors。
 - 下一步（按剩余任务建议顺序，小步做，每步跑验证；仍不拆大结构）：
-  1. P2-K（中等风险，建议单独一轮做）：运行中关闭面板/插件卸载时 killReason 与部分轮次处理完整，避免 promise settle 后仍操作 DOM
-  2. P1-3：让 DSH_HOME / patch / workdir 降级失败在 UI 可见（统一警告收集 + 消息内提示 + Notice）
-  3. 结构级工作（RunController 状态机 / 拆分 DshRunner、ChatView / stream-relay.js 移出 TS 模板串）风险高，另行安排
+  1. 若用户确认提交/推送：把上一轮 P2-K + P1-3 两个改动批次分别提交（提交信息参照 git log 风格），再连同 `02afd90` 一起 push（或由用户决定 push 范围）。
+  2. 结构级工作（RunController 状态机 / 拆分 DshRunner、ChatView / stream-relay.js 移出 TS 模板串）风险高，另行安排
 - 若用户要发布 v0.1.6：打 tag `0.1.6`（不带 v）并 push → release.yml 会先校验 tag 与 manifest.json 版本一致，再构建 draft release。
 
 红线与约定（务必遵守）：
