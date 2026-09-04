@@ -20,13 +20,26 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
       - name: Use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version: "22.x"
           cache: npm
+
+      # Guard against publishing the wrong version: the release tag (no "v"
+      # prefix, per docs/publish-checklist.md) must equal manifest.json's
+      # version, which is what the built plugin reports to Obsidian.
+      - name: Assert tag matches manifest version
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          manifest_version="$(node -p "require('./manifest.json').version")"
+          if [ "$tag" != "$manifest_version" ]; then
+            echo "::error::Release tag '${tag}' does not match manifest.json version '${manifest_version}'. Aborting."
+            exit 1
+          fi
+          echo "Tag ${tag} matches manifest.json version ${manifest_version}"
 
       - name: Install dependencies
         run: npm ci
