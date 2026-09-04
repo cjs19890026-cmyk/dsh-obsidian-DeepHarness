@@ -18,6 +18,17 @@
 
 ## 当前交接重点：第一/二阶段已完成，下面为剩余任务
 
+### 最近交接摘要（本轮收尾：P1-5 / P2-H / P2-I / 发布前必办 完成并已推送，2026-09-03，HEAD 78134a2 与远程同步）
+- 本轮会话完成 4 个批次并**全部推送**到 origin/dsh-obsidian-deepharness-new-architecture（`31b06d0..78134a2`，共 9 个提交，经 `git -c http.proxy= -c https.proxy= push`，无 ahead/behind）：
+  - P1-5 设置选项 union 化 + loadSettings 非法值回退（`2b039a1`，+6 测试）
+  - P2-H linkifyAnswer 缓存 + vault 变更失效（`7d453d3`，frontmatterAliases 抽纯函数 +3 测试）
+  - P2-I scanSkills 缓存 + 失效（`8d085b6`）
+  - 发布前必办：pin `obsidian` 1.13.1（`6e7f257`）+ Actions v4 / tag↔manifest 版本校验（`dddb738`）
+  - 每批附 docs(handoff) 提交；下方各批摘要里的“未推送”为写入时状态，实际均已推送。
+- 验证基线：npm test = 121 passed / 2 skipped；npx tsc --noEmit、npm run build、npx eslint src/*.ts（0 errors）全部通过。
+- 剩余任务：第 1 节（发布前必办）与第 2 节（低风险修复）已清零；剩 **P2-K（运行生命周期，中等风险，建议单独一轮）** 与 **P1-3（降级失败 UI 可见）**；之后才进结构拆分阶段（RunController / 拆分 DshRunner / ChatView 等）。
+- 给下一个 agent 的提示词模板见文末第 10 节（已随本轮刷新）。
+
 ### 最近交接摘要（发布前必办：obsidian 版本固定 + Actions v4 + tag/manifest 校验，2026-09-03，已提交 6e7f257 / dddb738，未推送）
 - 已完成：**剩余任务第 1 节「发布前必须完成」全部 3 条**。
 - 改动：
@@ -539,7 +550,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 
 ---
 
-## 10. 给下一个 Agent 的提示词模板（2026-09-03 更新：第四阶段低风险修复批告一段落后使用）
+## 10. 给下一个 Agent 的提示词模板（2026-09-03 更新：P1-5 / P2-H / P2-I / 发布前必办 完成并推送后使用）
 
 > 把下面这段发给下一个写代码的 agent：
 
@@ -555,14 +566,13 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 3. 如本地有 MAINTENANCE.md，再看其顶部维护摘要
 
 当前状态：
-- 分支 dsh-obsidian-deepharness-new-architecture：远程已推至 0427336；本地另有未推送提交 bf9915d / ad61a92 / c68aa17 / 84596f0。push 前先让用户确认，并绕代理：git -c http.proxy= -c https.proxy= push
-- “第四阶段”低风险修复批（子进程 env 白名单 / P2-D API Key 风险提示 / 生成文件原子写 / HistoryStore 标题 i18n）已完成。下一步从“剩余任务”按建议顺序挑低风险项，例如：
-  1. P1-5：DshSettings 的 model / reasoningEffort / permissionMode / toolExecutionMode 收窄为 option 推导的 union，并在 loadSettings 对非法值回退
-  2. P2-H：linkifyAnswer 缓存 vault 文件/别名列表并监听 vault 变更失效，避免每次回答全库扫描
-  3. P2-I：scanSkills 缓存或异步化，避免每次开面板/触发建议同步读盘
-  4. 发布前必须完成：固定 package.json 的 “obsidian”: “latest”；release 流程校验 tag 与 manifest.json 版本一致
-  5. P2-K（中等风险，建议单独做）：运行中关闭面板/插件卸载的运行生命周期
-- 暂不要做：拆 chat-view.ts / dsh-runner.ts 大结构、引入 RunController 状态机等结构级工作（高风险阶段另行安排）。
+- 分支 dsh-obsidian-deepharness-new-architecture 已与远程同步（HEAD `78134a2`；本轮 9 个提交均已 push）。push 仍需绕代理：git -c http.proxy= -c https.proxy= push origin dsh-obsidian-deepharness-new-architecture；提交与 push 前都先让用户确认。
+- 已完成并推送：P1-5 设置选项 union 化 + 加载回退（`2b039a1`）；P2-H linkifyAnswer 缓存（`7d453d3`）；P2-I scanSkills 缓存（`8d085b6`）；发布前必办（pin obsidian `1.13.1` `6e7f257`、Actions v4 + tag↔manifest 校验 `dddb738`）。剩余任务第 1、2 节已清零。验证基线：npm test = 121 passed / 2 skipped，tsc / build / eslint 0 errors。
+- 下一步（按剩余任务建议顺序，小步做，每步跑验证；仍不拆大结构）：
+  1. P2-K（中等风险，建议单独一轮做）：运行中关闭面板/插件卸载时 killReason 与部分轮次处理完整，避免 promise settle 后仍操作 DOM
+  2. P1-3：让 DSH_HOME / patch / workdir 降级失败在 UI 可见（统一警告收集 + 消息内提示 + Notice）
+  3. 结构级工作（RunController 状态机 / 拆分 DshRunner、ChatView / stream-relay.js 移出 TS 模板串）风险高，另行安排
+- 若用户要发布 v0.1.6：打 tag `0.1.6`（不带 v）并 push → release.yml 会先校验 tag 与 manifest.json 版本一致，再构建 draft release。
 
 红线与约定（务必遵守）：
 - 不改 DLEVENT 线协议；不改生成文件路径与 dsh-home 约定（vault/.obsidian/plugins/deepharness/generated/*、dsh-home/ 已被真实用户使用）。
@@ -578,10 +588,11 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 - npx tsc --noEmit
 - npm run build
 - npx eslint src/*.ts
-当前基线：112 passed / 2 skipped，eslint 0 errors。
+当前基线：121 passed / 2 skipped，eslint 0 errors（obsidian typings 固定为 1.13.1）。
 
 本机注意：
 - npm ci 若 EPERM：npm ci --cache "$(pwd)/.npm-cache"
+- package.json 中 obsidian 已固定为 1.13.1（勿改回 latest；改 typings 版本须过 tsc，设置页依赖 1.13 声明式 API）
 - 真实 vault 部署：Knowledge_Inbox1/.obsidian/plugins/deepharness/（UI/生成逻辑改动后需重新构建覆盖，并在 Obsidian 里禁用再启用插件）
-- 不要自行 push；提交前先让用户确认。
+- 提交与 push 前先让用户确认；push 用：git -c http.proxy= -c https.proxy= push origin dsh-obsidian-deepharness-new-architecture
 """
