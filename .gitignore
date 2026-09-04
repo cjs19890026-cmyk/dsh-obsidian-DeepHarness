@@ -2,8 +2,9 @@ node_modules/
 dist/
 .npm-cache/
 *.log
-# 本地维护文档(功能日志 + 交接摘要),不上线
+# 本地维护文档(功能日志 + 交接摘要 + 交接文档),不上线
 MAINTENANCE.md
+HANDOFF.md
 
 # macOS
 .DS_Store
