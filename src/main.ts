@@ -10,6 +10,9 @@ export default class DshPlugin extends Plugin {
   settings!: DshSettings;
   private vaultPatchInvalidated = false;
   private commandsRegistered = false;
+  /** P2-K: open chat views. Obsidian may skip onClose() on unload, so the
+   *  plugin tears each view down explicitly (see onunload). */
+  private chatViews = new Set<ChatView>();
   history: HistoryStore | null = null;
   private settingsChangeListeners = new Set<() => void>();
   private localeChangeListeners = new Set<() => void>();
@@ -40,9 +43,16 @@ export default class DshPlugin extends Plugin {
   }
 
   onunload(): void {
-    // Kill any running dsh child processes. Obsidian may or may not call each
-    // view's onClose() during unload, so walk the live-client registry
-    // explicitly — the safety net for reload/disable while a task runs.
+    // Views may not receive onClose() during unload; tear each open chat view
+    // down explicitly so an in-flight run settles through the closed-view path
+    // (P2-K): no DOM writes after teardown, and partial work is preserved as a
+    // history turn below.
+    for (const view of [...this.chatViews]) view.shutdownForUnload();
+    this.chatViews.clear();
+    // Kill any remaining running dsh child processes. Obsidian may or may not
+    // call each view's onClose() during unload, so walk the live-client
+    // registry explicitly — the safety net for reload/disable while a task
+    // runs.
     DshClient.disposeAll();
     // Persist the in-progress conversation into history before unload.
     // endSession() + save() are synchronous (fs.writeFileSync + renameSync),
@@ -50,6 +60,16 @@ export default class DshPlugin extends Plugin {
     // void and does NOT await a returned Promise — an async onunload would be
     // cut off mid-write on quit.
     void this.history?.endSession();
+  }
+
+  /** Track an open chat view (registered by ChatView at construction). */
+  registerChatView(view: ChatView): void {
+    this.chatViews.add(view);
+  }
+
+  /** Forget a chat view once it has been torn down. */
+  unregisterChatView(view: ChatView): void {
+    this.chatViews.delete(view);
   }
 
   /** Absolute filesystem path of the vault root. */

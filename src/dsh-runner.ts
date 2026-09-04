@@ -12,6 +12,21 @@ import { t, getLocale } from './i18n';
 const execFileAsync = promisify(execFile);
 
 /**
+ * P1-3: a degraded-setup notice. A preparation step that could not complete as
+ * configured (DSH_HOME fallback, patch write failure, workdir fallback, …)
+ * pushes one onto the optional collector the chat view passes per run, so the
+ * UI can surface the degradation instead of silently continuing. `message` is
+ * already localized at push time.
+ */
+export interface PreparationIssue {
+  level: 'warning' | 'error';
+  /** Stable identifier for tests / future filtering. */
+  code: string;
+  /** Human-readable, localized explanation. */
+  message: string;
+}
+
+/**
  * Command construction and environment probing for the dsh CLI.
  *
  * - Detects the `dsh` binary (explicit setting > PATH > common locations).
@@ -395,6 +410,7 @@ export class DshRunner {
   ensurePluginDshHome(
     vaultRoot: string,
     sel: { model: string; effort: string },
+    issues?: PreparationIssue[],
   ): string | null {
     const base = this.pluginHomeDir(vaultRoot);
     try {
@@ -447,6 +463,11 @@ export class DshRunner {
       writeFileAtomicSync(path.join(base, 'settings.yaml'), settingsLines.join('\n'));
       return base;
     } catch {
+      issues?.push({
+        level: 'warning',
+        code: 'dsh-home',
+        message: t('chat.degrade.dshHome'),
+      });
       return null;
     }
   }
@@ -454,8 +475,10 @@ export class DshRunner {
   /**
    * Directory the agent works on. Empty = vault root.
    * Returns an absolute path; ensures it exists.
+   * Degraded fallbacks (out-of-vault setting / unwritable dir) report a
+   * preparation issue when a collector is supplied (P1-3).
    */
-  workdir(vaultRoot: string): string {
+  workdir(vaultRoot: string, issues?: PreparationIssue[]): string {
     const rel = this.settings.workdir.trim();
     if (!rel) return vaultRoot;
     // Resolve `..` and absolute paths, then verify the result stays inside the
@@ -464,12 +487,22 @@ export class DshRunner {
     const base = path.resolve(vaultRoot, rel);
     const rel2 = path.relative(vaultRoot, base);
     if (rel2 === '..' || rel2.startsWith('..' + path.sep)) {
+      issues?.push({
+        level: 'warning',
+        code: 'workdir-outside',
+        message: t('chat.degrade.workdirOutside'),
+      });
       return vaultRoot;
     }
     try {
       fs.mkdirSync(base, { recursive: true });
     } catch {
       // read-only vault subpath: fall back to root
+      issues?.push({
+        level: 'warning',
+        code: 'workdir-mkdir',
+        message: t('chat.degrade.workdirMkdir'),
+      });
       return vaultRoot;
     }
     return base;
@@ -484,17 +517,25 @@ export class DshRunner {
    *
    * Returns the skill directory, or null on failure / when disabled.
    */
-  ensureObsidianSkill(vaultRoot: string): string | null {
+  ensureObsidianSkill(vaultRoot: string, issues?: PreparationIssue[]): string | null {
     if (!this.settings.obsidianSkill) return null;
     const skillRoot = path.join(this.pluginHomeDir(vaultRoot), 'skills');
+    const fail = (): null => {
+      issues?.push({
+        level: 'warning',
+        code: 'obsidian-skill',
+        message: t('chat.degrade.obsidianSkill'),
+      });
+      return null;
+    };
     try {
       fs.mkdirSync(skillRoot, { recursive: true });
       fs.chmodSync(skillRoot, 0o755);
     } catch {
-      return null;
+      return fail();
     }
     const res = writeObsidianSkill(skillRoot);
-    return res ? res.dir : null;
+    return res ? res.dir : fail();
   }
 
   /**
@@ -503,7 +544,7 @@ export class DshRunner {
    * vault-relative path), so it stays reachable even when the sandbox workdir
    * is a vault subfolder.
    */
-  ensureMemoryFile(vaultRoot: string): string | null {
+  ensureMemoryFile(vaultRoot: string, issues?: PreparationIssue[]): string | null {
     const file = path.join(vaultRoot, MEMORY_FILE);
     try {
       if (!fs.existsSync(file)) {
@@ -525,6 +566,11 @@ export class DshRunner {
       }
       return file;
     } catch {
+      issues?.push({
+        level: 'warning',
+        code: 'memory-file',
+        message: t('chat.degrade.memoryFile'),
+      });
       return null;
     }
   }
@@ -537,19 +583,31 @@ export class DshRunner {
    *
    * Returns the patch path, or null when there is nothing to register.
    */
-  ensureSkillDirsPatch(vaultRoot: string): string | null {
+  ensureSkillDirsPatch(vaultRoot: string, issues?: PreparationIssue[]): string | null {
     const dirs: string[] = [];
+    const rejected: string[] = [];
     for (const rel of this.settings.extraSkillDirs.split(',')) {
       // Only vault-internal relative directories are accepted: an absolute
       // path or a `../` escape would point DSH's skill scanner outside the
-      // vault, so such entries are rejected (skipped).
+      // vault, so such entries are rejected (skipped) — and reported, since
+      // they are misconfigured (P1-3). Blank CSV slots are ignored silently.
       const abs = resolveVaultRelativeDir(vaultRoot, rel);
-      if (!abs) continue;
+      if (!abs) {
+        if (rel.trim()) rejected.push(rel.trim());
+        continue;
+      }
       try {
         if (fs.statSync(abs).isDirectory()) dirs.push(abs);
       } catch {
         // missing dir: skip (valid empty state)
       }
+    }
+    if (rejected.length > 0) {
+      issues?.push({
+        level: 'warning',
+        code: 'skill-dirs-rejected',
+        message: t('chat.degrade.skillDirsRejected', { dirs: rejected.join(', ') }),
+      });
     }
     if (dirs.length === 0) return null;
     const dir = path.join(vaultRoot, this.configDir, 'plugins', 'deepharness', 'generated');
@@ -569,6 +627,11 @@ export class DshRunner {
       writeFileAtomicSync(file, yml);
       return file;
     } catch {
+      issues?.push({
+        level: 'warning',
+        code: 'skill-dirs-write',
+        message: t('chat.degrade.skillDirsWrite'),
+      });
       return null;
     }
   }
@@ -582,6 +645,7 @@ export class DshRunner {
    */
   async ensureVaultPatch(
     vaultRoot: string,
+    issues?: PreparationIssue[],
   ): Promise<{ persona: string | null; think: string | null }> {
     const dir = path.join(vaultRoot, this.configDir, 'plugins', 'deepharness', 'generated');
     try {
@@ -590,6 +654,11 @@ export class DshRunner {
       // file creation inside; force standard perms so the plugin always works.
       fs.chmodSync(dir, 0o755);
     } catch {
+      issues?.push({
+        level: 'warning',
+        code: 'patch-dir',
+        message: t('chat.degrade.patchDir'),
+      });
       return { persona: null, think: null };
     }
 
@@ -619,6 +688,11 @@ export class DshRunner {
       }
       persona = personaFile;
     } catch {
+      issues?.push({
+        level: 'warning',
+        code: 'patch-persona',
+        message: t('chat.degrade.patchPersona'),
+      });
       persona = null;
     }
 
@@ -634,6 +708,11 @@ export class DshRunner {
       writeFileAtomicSync(thinkYml, streamRelayPatchYaml(thinkJs));
       think = thinkYml;
     } catch {
+      issues?.push({
+        level: 'warning',
+        code: 'patch-stream',
+        message: t('chat.degrade.patchStream'),
+      });
       think = null;
     }
 

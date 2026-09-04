@@ -1,14 +1,14 @@
 import * as path from 'path';
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, setIcon, Menu, MarkdownView, Keymap } from 'obsidian';
 import type DshPlugin from './main';
-import { DshClient } from './dsh-client';
-import { DshRunner } from './dsh-runner';
+import { DshClient, type DshRunResult } from './dsh-client';
+import { DshRunner, type PreparationIssue } from './dsh-runner';
 import { buildTitleEntries, linkifyNoteTitles, type NoteInfo, type NoteTitleEntry } from './linkify';
 import { scanSkillRoots, type SkillEntry, type ScanRoot } from './skills';
 import { SkillSuggest } from './skill-suggest';
 import { MODEL_OPTIONS, REASONING_OPTIONS, PERMISSION_OPTIONS, permissionLabel, type PermissionMode } from './settings';
 import { ContextMeter, estimateTokens } from './context-meter';
-import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir, frontmatterAliases } from './pure';
+import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir, frontmatterAliases, partialTurnAnswer } from './pure';
 import { HistoryTool } from './history';
 import { MentionSuggest } from './mention';
 import { ChipEditor } from './chip-editor';
@@ -66,12 +66,19 @@ export class ChatView extends ItemView {
   /** P2-I: cached skill catalog (keyed by scanned roots); invalidated on
    *  vault/settings changes instead of on every panel open / suggestion. */
   private skillCache: { key: string; skills: SkillEntry[] } | null = null;
+  /** P2-K: the view (or the plugin) has been torn down. Once true, an
+   *  in-flight run's promise must never touch the DOM again — it may only
+   *  persist an optional partial turn. Set by onClose() / shutdownForUnload(). */
+  private closed = false;
 
   constructor(leaf: WorkspaceLeaf, plugin: DshPlugin) {
     super(leaf);
     this.plugin = plugin;
     this.client = new DshClient();
     this.runner = new DshRunner(plugin.settings, plugin.app.vault.configDir);
+    // The plugin walks its open views on unload (Obsidian may skip onClose()),
+    // so every view joins the registry at birth and leaves on teardown.
+    plugin.registerChatView(this);
   }
 
   getViewType(): string {
@@ -320,19 +327,47 @@ export class ChatView extends ItemView {
   }
 
   onClose(): Promise<void> {
+    this.teardown();
+    this.plugin.unregisterChatView(this);
+    return Promise.resolve();
+  }
+
+  /**
+   * Plugin-unload hook, called by DshPlugin.onunload() for every open chat
+   * view. Obsidian does NOT reliably call onClose() on each view before
+   * unload, so the plugin walks its view registry explicitly. Idempotent:
+   * safe even when Obsidian later calls onClose() as well.
+   */
+  shutdownForUnload(): void {
+    this.teardown();
+    this.plugin.unregisterChatView(this);
+  }
+
+  /**
+   * Shared view teardown (P2-K). Marks the view closed and stops any in-flight
+   * run so its promise settles through the closed-view path in sendMessage()
+   * — nothing may touch the DOM after this point. abort() reports the
+   * interruption as killReason 'user'; dispose() kills the child and drops the
+   * client from the plugin's live registry.
+   */
+  private teardown(): void {
+    this.closed = true;
+    this.abortController?.abort();
+    this.client.dispose();
     this.closeHistoryPanel();
     this.closeSkillPanel();
     this.mention?.dispose();
     this.mention = null;
     this.skillSuggest?.dispose();
     this.skillSuggest = null;
-    this.client.dispose();
-    if (this.statusTimer !== null) window.clearInterval(this.statusTimer);
+    if (this.statusTimer !== null) {
+      window.clearInterval(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.settingsUnsub?.();
     this.settingsUnsub = null;
     this.localeUnsub?.();
     this.localeUnsub = null;
-    return Promise.resolve();
   }
 
   private showWelcome(): void {
@@ -367,6 +402,9 @@ export class ChatView extends ItemView {
     }
 
     const bin = await this.runner.detectBin();
+    // The view may be torn down while we await (close panel / plugin unload):
+    // never continue into a dead view — no DOM writes, no spawn.
+    if (this.closed) return;
     if (!bin) {
       this.renderMessage('assistant', `> ⚠️ ${t('chat.noDsh')}`, true);
       new Notice(t('chat.noDsh'), 6000);
@@ -375,6 +413,7 @@ export class ChatView extends ItemView {
     // Detect node + dsh's real script so we spawn `node bin.js` directly
     // (bypasses the shebang, which fails under Electron's restricted PATH).
     const nodeBin = await this.runner.detectNode();
+    if (this.closed) return;
     if (!nodeBin) {
       this.renderMessage('assistant', `> ⚠️ ${t('chat.noNode')}`, true);
       new Notice(t('chat.noNode'), 6000);
@@ -402,19 +441,28 @@ export class ChatView extends ItemView {
     if (this.contextMeter) {
       this.contextMeter.addTokens(PERSONA_FIXED_TOKENS + estimateTokens(task));
     }
-    const patches = await this.runner.ensureVaultPatch(vaultRoot);
-    const skillDirsPatch = this.runner.ensureSkillDirsPatch(vaultRoot);
+    // P1-3: preparation-step degradation (fallbacks / failed writes) is
+    // collected here and surfaced to the user before the run starts.
+    const prepIssues: PreparationIssue[] = [];
+    const patches = await this.runner.ensureVaultPatch(vaultRoot, prepIssues);
+    if (this.closed) return; // torn down during patch prep — do not start the run
+    const skillDirsPatch = this.runner.ensureSkillDirsPatch(vaultRoot, prepIssues);
     const patchPaths = [patches.persona, patches.think, skillDirsPatch].filter((p): p is string => p !== null);
     // Built-in obsidian skill + long-term memory seed.
-    this.runner.ensureObsidianSkill(vaultRoot);
-    this.runner.ensureMemoryFile(vaultRoot);
+    this.runner.ensureObsidianSkill(vaultRoot, prepIssues);
+    this.runner.ensureMemoryFile(vaultRoot, prepIssues);
     // Isolated DSH_HOME with the selected model + reasoning effort;
     // falls back to the user home when it cannot be prepared.
     const pluginHome = this.runner.ensurePluginDshHome(vaultRoot, {
       model: this.plugin.settings.model,
       effort: this.plugin.settings.reasoningEffort,
-    });
+    }, prepIssues);
     const dshHome = pluginHome ?? this.runner.dshHome();
+    const workdir = this.runner.workdir(vaultRoot, prepIssues);
+    // P1-3: preparation degraded (DSH_HOME fallback, patch / skill / memory
+    // write failures, workdir fallback…) — surface it once instead of running
+    // degraded silently.
+    if (prepIssues.length > 0) this.renderPreparationIssues(prepIssues);
 
     // Streaming assistant message: thinking + tools stream inline into the
     // message (web-UI style, no wrapper container), then the answer renders
@@ -455,6 +503,9 @@ export class ChatView extends ItemView {
     const toolsHistory: HistoryTool[] = [];
     let thinkingText = '';
     const handleStreamLine = (line: string): void => {
+      // The view/plugin may be torn down between the kill request and the
+      // child actually exiting — nothing may stream into a dead DOM (P2-K).
+      if (this.closed) return;
       const evt = parseDshEventLine(line);
       if (!evt) return;
       if (evt.t === 'think') {
@@ -527,7 +578,7 @@ export class ChatView extends ItemView {
         dshBin: bin,
         nodeBin,
         dshScript,
-        cwd: this.runner.workdir(vaultRoot),
+        cwd: workdir,
         dshHome,
         apiKey: this.plugin.settings.apiKey.trim() || undefined,
         provider: this.plugin.settings.provider,
@@ -541,7 +592,13 @@ export class ChatView extends ItemView {
 
       this.stopStatusTimer();
 
-      if (result.killReason === 'user') {
+      if (this.closed) {
+        // P2-K: the view (or the plugin) went away while the task ran. The DOM
+        // is gone — never write to it. What the run produced before the kill
+        // is kept as a partial turn (when it is worth keeping) instead of
+        // being silently dropped.
+        this.savePartialTurn(message, thinkingText, toolsHistory, result);
+      } else if (result.killReason === 'user') {
         // Stopped by the user: keep it subtle — a small status note only.
         statusEl.setText(`⏹ ${t('chat.cancelled')}`);
         this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
@@ -587,6 +644,7 @@ export class ChatView extends ItemView {
       }
     } catch (e) {
       this.stopStatusTimer();
+      if (this.closed) return; // torn down mid-run: nothing to render
       const msg = e instanceof Error ? e.message : String(e);
       statusEl.setText(`✗ ${t('chat.failed', { message: msg })}`);
       statusEl.addClass('dsh-status-error');
@@ -595,9 +653,56 @@ export class ChatView extends ItemView {
     } finally {
       this.running = false;
       this.abortController = null;
-      this.resetButtonToSend();
-      this.scrollToBottom();
+      if (!this.closed) {
+        this.resetButtonToSend();
+        this.scrollToBottom();
+      }
     }
+  }
+
+  /**
+   * P2-K: persist an interrupted run (the view was closed / the plugin was
+   * unloaded while the task ran) as a partial turn, so reasoning + tool
+   * activity produced before the kill is not silently lost. Nothing is
+   * recorded when the run produced no content worth keeping.
+   */
+  private savePartialTurn(
+    message: string,
+    thinkingText: string,
+    tools: HistoryTool[],
+    result: DshRunResult,
+  ): void {
+    const answer = partialTurnAnswer(
+      result.stdout,
+      thinkingText,
+      tools.length > 0,
+      t('chat.runInterrupted'),
+    );
+    if (answer === null) return; // nothing worth keeping
+    void this.plugin.history?.addTurn({
+      ts: Date.now(),
+      user: message,
+      answer,
+      thinking: thinkingText.trim() || undefined,
+      tools: tools.length > 0 ? tools : undefined,
+      durationMs: result.durationMs,
+    }, {
+      model: this.plugin.settings.model,
+      effort: this.plugin.settings.reasoningEffort,
+      permission: this.plugin.settings.permissionMode,
+    });
+  }
+
+  /**
+   * P1-3: surface degraded preparation (DSH_HOME fallback, failed persona /
+   * stream / skill / memory writes, workdir fallback, rejected extra skill
+   * dirs) as one system message listing every issue, plus a Notice. The run
+   * still proceeds — but the user now sees that some capabilities are missing.
+   */
+  private renderPreparationIssues(issues: PreparationIssue[]): void {
+    const lines = issues.map((i) => `> - ${i.message}`);
+    this.renderMessage('assistant', [`> ⚠️ ${t('chat.degrade.title')}`, ...lines].join('\n'), true);
+    new Notice(t('chat.degrade.notice', { count: String(issues.length) }), 6000);
   }
 
   private stopRun(): void {

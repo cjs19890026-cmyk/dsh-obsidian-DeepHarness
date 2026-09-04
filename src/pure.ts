@@ -211,3 +211,25 @@ export function frontmatterAliases(raw: unknown): string[] {
   }
   return [];
 }
+
+/**
+ * P2-K: decide whether an interrupted run (view closed / plugin unloaded while
+ * the task ran) produced partial content worth keeping as a history turn, and
+ * what answer text to store for it.
+ *
+ * Returns:
+ *  - the partial final answer from stdout (DLEVENT lines stripped) when non-empty,
+ *  - the caller's `marker` when only thinking / tool activity arrived,
+ *  - null when nothing meaningful was produced (record nothing).
+ */
+export function partialTurnAnswer(
+  partialStdout: string,
+  thinking: string,
+  hasTools: boolean,
+  marker: string,
+): string | null {
+  const answer = parseHeadlessOutput(partialStdout).trim();
+  if (answer) return answer;
+  if (thinking.trim() || hasTools) return marker;
+  return null;
+}

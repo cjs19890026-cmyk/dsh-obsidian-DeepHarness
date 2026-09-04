@@ -12,6 +12,7 @@ import {
   shimJsTarget,
   resolveVaultRelativeDir,
   frontmatterAliases,
+  partialTurnAnswer,
 } from './pure';
 import { estimateTokens } from './context-meter';
 
@@ -287,5 +288,28 @@ describe('frontmatterAliases (P2-H)', () => {
     for (const raw of [undefined, null, 42, { a: 1 }]) {
       expect(frontmatterAliases(raw)).toEqual([]);
     }
+  });
+});
+
+describe('partialTurnAnswer (P2-K)', () => {
+  const marker = '(interrupted — partial work saved)';
+
+  it('keeps the partial final answer when stdout has real content', () => {
+    expect(partialTurnAnswer('DLEVENT\t{\"t\":\"think\"}\npartial answer', '', false, marker))
+      .toBe('partial answer');
+  });
+
+  it('uses the marker when only thinking arrived before the kill', () => {
+    expect(partialTurnAnswer('', 'some reasoning', false, marker)).toBe(marker);
+  });
+
+  it('uses the marker when only tool activity arrived before the kill', () => {
+    expect(partialTurnAnswer('', '', true, marker)).toBe(marker);
+  });
+
+  it('returns null when the run produced nothing worth keeping', () => {
+    expect(partialTurnAnswer('', '', false, marker)).toBeNull();
+    expect(partialTurnAnswer('DLEVENT\t{\"t\":\"think\"}\n', '', false, marker)).toBeNull();
+    expect(partialTurnAnswer('   \n  ', '   ', false, marker)).toBeNull();
   });
 });

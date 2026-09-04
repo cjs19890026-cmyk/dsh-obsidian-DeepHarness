@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { DshRunner } from './dsh-runner';
+import { DshRunner, type PreparationIssue } from './dsh-runner';
 import type { DshSettings } from './settings';
 
 /**
@@ -263,5 +263,146 @@ describe('DshRunner generated-file writes are atomic', () => {
     expect(yaml).toContain('model: deepseek-v4-pro');
     expect(yaml).toContain('reasoningEffort: max');
     expect(listTmpFiles(home as string)).toEqual([]);
+  });
+});
+
+describe('DshRunner preparation degradation reporting (P1-3)', () => {
+  let dir: string;
+  let vaultRoot: string;
+  let settings: DshSettings;
+  let runner: DshRunner;
+
+  function makeSettings(): DshSettings {
+    return {
+      dshBin: '',
+      nodeBin: '',
+      dshHome: '~/.dsh',
+      workdir: '',
+      timeoutSec: 600,
+      memoryEnabled: true,
+      language: 'auto',
+      customPersona: '',
+      toolExecutionMode: '',
+      model: 'deepseek-v4-flash',
+      reasoningEffort: 'high',
+      permissionMode: 'workspace-write',
+      showThinking: true,
+      showTools: true,
+      historyLimit: 50,
+      obsidianSkill: true,
+      extraSkillDirs: '',
+      apiKey: '',
+      provider: 'deepseek-official',
+    };
+  }
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-runner-degrade-'));
+    vaultRoot = path.join(dir, 'vault');
+    fs.mkdirSync(vaultRoot);
+    fs.mkdirSync(path.join(vaultRoot, 'Skills'), { recursive: true });
+    settings = makeSettings();
+    runner = new DshRunner(settings, '.obsidian');
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  function codes(issues: PreparationIssue[]): string[] {
+    return issues.map((i) => i.code);
+  }
+
+  it('reports an out-of-vault workdir and falls back to the root', () => {
+    settings.workdir = '../outside-vault';
+    const issues: PreparationIssue[] = [];
+    expect(runner.workdir(vaultRoot, issues)).toBe(vaultRoot);
+    expect(codes(issues)).toEqual(['workdir-outside']);
+  });
+
+  it('reports an absolute-path workdir outside the vault and falls back', () => {
+    settings.workdir = path.join(dir, 'elsewhere');
+    const issues: PreparationIssue[] = [];
+    expect(runner.workdir(vaultRoot, issues)).toBe(vaultRoot);
+    expect(codes(issues)).toEqual(['workdir-outside']);
+  });
+
+  it('reports an unwritable workdir and falls back to the root', () => {
+    settings.workdir = 'blocked';
+    fs.writeFileSync(path.join(vaultRoot, 'blocked'), 'a file in the way');
+    const issues: PreparationIssue[] = [];
+    expect(runner.workdir(vaultRoot, issues)).toBe(vaultRoot);
+    expect(codes(issues)).toEqual(['workdir-mkdir']);
+  });
+
+  it('keeps quiet when the workdir is a valid vault-internal folder', () => {
+    settings.workdir = 'Skills';
+    const issues: PreparationIssue[] = [];
+    expect(runner.workdir(vaultRoot, issues)).toBe(path.join(vaultRoot, 'Skills'));
+    expect(issues).toEqual([]);
+  });
+
+  it('reports rejected extra skill dirs alongside the valid patch', () => {
+    settings.extraSkillDirs = `Skills, ${path.join(dir, 'outside-skill')}, ../escape`;
+    const issues: PreparationIssue[] = [];
+    const file = runner.ensureSkillDirsPatch(vaultRoot, issues);
+    expect(file).not.toBeNull();
+    expect(codes(issues)).toContain('skill-dirs-rejected');
+  });
+
+  it('returns null + an issue when every extra skill dir is rejected', () => {
+    settings.extraSkillDirs = '../a, /etc';
+    const issues: PreparationIssue[] = [];
+    expect(runner.ensureSkillDirsPatch(vaultRoot, issues)).toBeNull();
+    expect(codes(issues)).toEqual(['skill-dirs-rejected']);
+  });
+
+  it('reports nothing for a legitimately empty extraSkillDirs', () => {
+    settings.extraSkillDirs = '';
+    const issues: PreparationIssue[] = [];
+    expect(runner.ensureSkillDirsPatch(vaultRoot, issues)).toBeNull();
+    expect(issues).toEqual([]);
+  });
+
+  it('reports when the plugin DSH_HOME cannot be created', () => {
+    fs.writeFileSync(path.join(vaultRoot, '.obsidian'), 'a file in the way');
+    const issues: PreparationIssue[] = [];
+    const home = runner.ensurePluginDshHome(
+      vaultRoot,
+      { model: 'deepseek-v4-flash', effort: 'high' },
+      issues,
+    );
+    expect(home).toBeNull();
+    expect(codes(issues)).toEqual(['dsh-home']);
+  });
+
+  it('reports when the generated patch directory cannot be created', async () => {
+    fs.writeFileSync(path.join(vaultRoot, '.obsidian'), 'a file in the way');
+    const issues: PreparationIssue[] = [];
+    const res = await runner.ensureVaultPatch(vaultRoot, issues);
+    expect(res.persona).toBeNull();
+    expect(res.think).toBeNull();
+    expect(codes(issues)).toEqual(['patch-dir']);
+  });
+
+  it('reports when the obsidian skill cannot be installed', () => {
+    fs.writeFileSync(path.join(vaultRoot, '.obsidian'), 'a file in the way');
+    const issues: PreparationIssue[] = [];
+    expect(runner.ensureObsidianSkill(vaultRoot, issues)).toBeNull();
+    expect(codes(issues)).toEqual(['obsidian-skill']);
+  });
+
+  it('stays quiet when the obsidian skill is disabled in settings', () => {
+    settings.obsidianSkill = false;
+    const issues: PreparationIssue[] = [];
+    expect(runner.ensureObsidianSkill(vaultRoot, issues)).toBeNull();
+    expect(issues).toEqual([]);
+  });
+
+  it('reports when the memory seed file cannot be created', () => {
+    fs.writeFileSync(path.join(vaultRoot, 'Harness'), 'a file in the way');
+    const issues: PreparationIssue[] = [];
+    expect(runner.ensureMemoryFile(vaultRoot, issues)).toBeNull();
+    expect(codes(issues)).toEqual(['memory-file']);
   });
 });
