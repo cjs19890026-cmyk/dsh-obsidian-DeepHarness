@@ -6,7 +6,7 @@ import { DshRunner } from './dsh-runner';
 import { buildTitleEntries, linkifyNoteTitles, type NoteInfo } from './linkify';
 import { scanSkillRoots, type SkillEntry, type ScanRoot } from './skills';
 import { SkillSuggest } from './skill-suggest';
-import { MODEL_OPTIONS, REASONING_OPTIONS, PERMISSION_OPTIONS, permissionLabel } from './settings';
+import { MODEL_OPTIONS, REASONING_OPTIONS, PERMISSION_OPTIONS, permissionLabel, type PermissionMode } from './settings';
 import { ContextMeter, estimateTokens } from './context-meter';
 import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir } from './pure';
 import { HistoryTool } from './history';
@@ -291,7 +291,7 @@ export class ChatView extends ItemView {
   }
 
   /** Delegate to the plugin's single confirmation path, then refresh labels. */
-  private async applyPermissionMode(mode: string): Promise<void> {
+  private async applyPermissionMode(mode: PermissionMode): Promise<void> {
     await this.plugin.setPermissionMode(mode);
     this.updateTriggerLabels();
   }

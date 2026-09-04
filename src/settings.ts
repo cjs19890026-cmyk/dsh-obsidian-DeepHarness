@@ -42,13 +42,13 @@ export interface DshSettings {
   language: 'auto' | Locale;
   customPersona: string;
   /** Tool execution backend: '' (default native) | 'native' | 'code' | 'both'. */
-  toolExecutionMode: string;
-  /** DeepSeek model id: deepseek-v4-flash | deepseek-v4-pro | deepseek-v4-flash-vision-exp. */
-  model: string;
-  /** Reasoning effort: off | high | max. */
-  reasoningEffort: string;
-  /** DSH sandbox mode: read-only | workspace-write | danger-full-access. */
-  permissionMode: string;
+  toolExecutionMode: ToolExecutionMode;
+  /** DeepSeek model id (one of MODEL_OPTIONS). */
+  model: ModelId;
+  /** Reasoning effort (one of REASONING_OPTIONS). */
+  reasoningEffort: ReasoningEffort;
+  /** DSH sandbox mode (one of PERMISSION_OPTIONS). */
+  permissionMode: PermissionMode;
   /** Show the thinking (reasoning) block in the chat. */
   showThinking: boolean;
   /** Show tool call blocks in the chat. */
@@ -62,7 +62,7 @@ export interface DshSettings {
   /** Plugin-only DeepSeek API key; empty = reuse the desktop DSH credentials. */
   apiKey: string;
   /** Model API backend used by the plugin's isolated DSH_HOME. */
-  provider: 'deepseek-official' | 'opencode-go';
+  provider: ProviderId;
 }
 
 export const DEFAULT_SETTINGS: DshSettings = {
@@ -115,10 +115,76 @@ export const PERMISSION_OPTIONS = [
   { id: 'danger-full-access', label: 'Full access' },
 ] as const;
 
+/** Union types derived from the option lists above (see §4.5 of HANDOFF.md). */
+export type ProviderId = typeof PROVIDER_OPTIONS[number]['id'];
+export type ModelId = typeof MODEL_OPTIONS[number]['id'];
+export type ReasoningEffort = typeof REASONING_OPTIONS[number]['id'];
+export type PermissionMode = typeof PERMISSION_OPTIONS[number]['id'];
+
+/** Tool execution modes ('' = DSH default). Kept as an option list so the type
+ *  and the settings dropdown cannot drift apart. */
+export const TOOL_EXECUTION_MODES = ['', 'native', 'code', 'both'] as const;
+export type ToolExecutionMode = typeof TOOL_EXECUTION_MODES[number];
+
+/** Non-localized labels for the non-empty tool modes ('' shows the localized
+ *  'Default (native)' label). */
+const TOOL_EXECUTION_LABELS: Record<Exclude<ToolExecutionMode, ''>, string> = {
+  native: 'Native',
+  code: 'Code',
+  both: 'Both',
+};
+
 /** Label for a permission mode id (used in chat + settings). Never localized. */
-export function permissionLabel(id: string): string {
+export function permissionLabel(id: PermissionMode): string {
   const o = PERMISSION_OPTIONS.find((x) => x.id === id);
   return o ? o.label : id;
+}
+
+/** Option-backed DshSettings keys: their value must be one of a fixed list. */
+export type OptionFieldKey =
+  | 'provider'
+  | 'model'
+  | 'reasoningEffort'
+  | 'permissionMode'
+  | 'toolExecutionMode';
+
+/** The selectable ids for each option-backed key (used for load-time checks). */
+const OPTION_FIELD_IDS: Record<OptionFieldKey, readonly string[]> = {
+  provider: PROVIDER_OPTIONS.map((o) => o.id),
+  model: MODEL_OPTIONS.map((o) => o.id),
+  reasoningEffort: REASONING_OPTIONS.map((o) => o.id),
+  permissionMode: PERMISSION_OPTIONS.map((o) => o.id),
+  toolExecutionMode: [...TOOL_EXECUTION_MODES],
+};
+
+/**
+ * P1-5: validate settings read from the plugin data file and fall back to the
+ * DEFAULT_SETTINGS value whenever a stored option-backed field no longer
+ * matches the current option lists (e.g. a model id removed in a newer
+ * release, or a hand-edited data.json). Non-option fields keep their stored
+ * values. `reset` lists the option fields that were corrected, so the caller
+ * can heal the file and surface one notice.
+ */
+export function normalizeStoredSettings(
+  raw: unknown,
+): { settings: DshSettings; reset: OptionFieldKey[] } {
+  const stored = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  const settings = Object.assign({}, DEFAULT_SETTINGS, stored) as DshSettings;
+  const reset: OptionFieldKey[] = [];
+  // Fallbacks are written through a plain record: fields here are validated
+  // dynamically, and TypeScript cannot assign across distinct union keys via
+  // a single index access (their intersection is `never`).
+  const target = settings as unknown as Record<string, unknown>;
+  for (const field of Object.keys(OPTION_FIELD_IDS) as OptionFieldKey[]) {
+    if (!Object.prototype.hasOwnProperty.call(stored, field)) continue;
+    const allowed = OPTION_FIELD_IDS[field];
+    const value = stored[field];
+    if (typeof value !== 'string' || !allowed.includes(value)) {
+      target[field] = DEFAULT_SETTINGS[field];
+      reset.push(field);
+    }
+  }
+  return { settings, reset };
 }
 
 export class DshSettingTab extends PluginSettingTab {
@@ -257,12 +323,12 @@ export class DshSettingTab extends PluginSettingTab {
 
           render(t('settings.toolMode.name'), t('settings.toolMode.desc'), (setting) => {
             setting.addDropdown((dd) => {
-              dd.addOption('', t('settings.toolModeDefault'));
-              dd.addOption('native', 'Native');
-              dd.addOption('code', 'Code');
-              dd.addOption('both', 'Both');
+              for (const mode of TOOL_EXECUTION_MODES) {
+                const label = mode === '' ? t('settings.toolModeDefault') : TOOL_EXECUTION_LABELS[mode];
+                dd.addOption(mode, label);
+              }
               dd.setValue(s.toolExecutionMode).onChange(async (value) => {
-                s.toolExecutionMode = value;
+                s.toolExecutionMode = value as ToolExecutionMode;
                 await this.plugin.saveSettings();
               });
             });
@@ -272,7 +338,7 @@ export class DshSettingTab extends PluginSettingTab {
             setting.addDropdown((dd) => {
               for (const m of MODEL_OPTIONS) dd.addOption(m.id, m.label);
               dd.setValue(s.model).onChange(async (value) => {
-                s.model = value;
+                s.model = value as ModelId;
                 await this.plugin.saveSettings();
               });
             });
@@ -282,7 +348,7 @@ export class DshSettingTab extends PluginSettingTab {
             setting.addDropdown((dd) => {
               for (const r of REASONING_OPTIONS) dd.addOption(r.id, r.label);
               dd.setValue(s.reasoningEffort).onChange(async (value) => {
-                s.reasoningEffort = value;
+                s.reasoningEffort = value as ReasoningEffort;
                 await this.plugin.saveSettings();
               });
             });
@@ -292,7 +358,7 @@ export class DshSettingTab extends PluginSettingTab {
             setting.addDropdown((dd) => {
               for (const p of PERMISSION_OPTIONS) dd.addOption(p.id, permissionLabel(p.id));
               dd.setValue(s.permissionMode).onChange(async (value) => {
-                await this.plugin.setPermissionMode(value);
+                await this.plugin.setPermissionMode(value as PermissionMode);
                 dd.setValue(s.permissionMode);
               });
             });

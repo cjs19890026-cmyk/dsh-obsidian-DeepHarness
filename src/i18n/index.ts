@@ -126,6 +126,7 @@ const translations = {
     'settings.check.settingsYaml': 'plugin settings.yaml',
     'settings.check.writableOk': '✓ {path} is writable',
     'settings.check.writableFail': '✗ {path} is not writable: {message}',
+    'settings.storedOptionReset': 'Invalid stored value(s) in the plugin data file — reset to default: {fields}',
 
     'chat.skillButton': 'Skills',
     'chat.skillEmpty': 'No skills found. Put a SKILL.md in .dsh/skills/ or add directories in settings.',
@@ -264,6 +265,7 @@ const translations = {
     'settings.check.settingsYaml': '插件 settings.yaml',
     'settings.check.writableOk': '✓ {path} 可写',
     'settings.check.writableFail': '✗ {path} 不可写: {message}',
+    'settings.storedOptionReset': '插件数据文件中存储的选项值无效,已重置为默认值:{fields}',
 
     'chat.skillButton': '技能',
     'chat.skillEmpty': '未发现技能。把 SKILL.md 放到 .dsh/skills/ 下,或在设置中添加技能目录。',

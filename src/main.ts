@@ -1,5 +1,5 @@
 import { Plugin, WorkspaceLeaf, Notice } from 'obsidian';
-import { DshSettings, DshSettingTab, DEFAULT_SETTINGS, obsidianLocale } from './settings';
+import { DshSettings, DshSettingTab, normalizeStoredSettings, obsidianLocale, type OptionFieldKey, type PermissionMode } from './settings';
 import { ChatView, VIEW_TYPE_CHAT } from './chat-view';
 import { SecurityConfirmModal } from './modals';
 import { DshClient } from './dsh-client';
@@ -131,7 +131,7 @@ export default class DshPlugin extends Plugin {
    * be bypassed from one UI surface. Returns true when the mode was applied,
    * false when the user cancelled.
    */
-  async setPermissionMode(mode: string): Promise<boolean> {
+  async setPermissionMode(mode: PermissionMode): Promise<boolean> {
     const switchingToFull = mode === 'danger-full-access'
       && this.settings.permissionMode !== 'danger-full-access';
     if (!switchingToFull) {
@@ -196,14 +196,36 @@ export default class DshPlugin extends Plugin {
   }
 
   async loadSettings(): Promise<void> {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData() as Partial<DshSettings>);
+    // P1-5: data-file settings are untrusted. Option-backed fields (model /
+    // reasoningEffort / permissionMode / toolExecutionMode / provider) fall
+    // back to DEFAULT_SETTINGS when the stored value is not in the option
+    // lists any more (hand-edited data.json, id removed in a newer release).
+    const { settings, reset } = normalizeStoredSettings(await this.loadData());
+    this.settings = settings;
     // Migration: v0.1.0 wrongly injected DSH_TOOLS_MODE=workspace-write (a
     // file-sandbox value into a tool-backend knob, breaking profile boot).
     // Drop the legacy field so it can never be read again.
     const legacy = this.settings as unknown as { toolsMode?: string };
-    if (legacy.toolsMode !== undefined) {
-      delete legacy.toolsMode;
+    const legacyMigrated = legacy.toolsMode !== undefined;
+    if (legacyMigrated) delete legacy.toolsMode;
+    if (reset.length > 0 || legacyMigrated) {
+      // Heal data.json so a corrected value does not reset again on launch.
       await this.saveSettings();
+    }
+    if (reset.length > 0) {
+      // loadSettings runs before applyLocale() in onload — apply the locale
+      // first so the reset notice is shown in the user's UI language.
+      this.applyLocale();
+      const fieldLabels: Record<OptionFieldKey, string> = {
+        provider: t('settings.provider.name'),
+        model: t('settings.model.name'),
+        reasoningEffort: t('settings.reasoning.name'),
+        permissionMode: t('settings.permission.name'),
+        toolExecutionMode: t('settings.toolMode.name'),
+      };
+      new Notice(t('settings.storedOptionReset', {
+        fields: reset.map((field) => fieldLabels[field]).join(', '),
+      }));
     }
   }
 
