@@ -18,6 +18,15 @@
 
 ## 当前交接重点：第一/二阶段已完成，下面为剩余任务
 
+### 最近交接摘要（P2-I scanSkills 缓存 + 失效，2026-09-03，已提交 8d085b6，未推送）
+- 已完成：**P2-I scanSkills 缓存**（剩余任务「下一批低风险代码修复」）。
+- 改动文件：
+  - src/chat-view.ts：`scanSkills()` 按 `vaultRoot + extraSkillDirs` 键缓存结果（新字段 `skillCache`），拆出 `scanRoots(vaultRoot)`；缓存被以下事件置脏：vault create/delete/rename/modify（与 P2-H 的 linkify 缓存共用 onOpen 里同一个 `invalidateCaches` 处理器）+ 任意设置保存（extraSkillDirs 变更时 `onSettingsChange` 清空）。
+- 效果：🔧 技能面板与 `/` 建议弹出不再每次同步 `readdirSync`/`readFileSync` 扫盘；vault/设置实际变更后下一次打开自动重建。行为/文案零变化。
+- 验证基线：npm test = 121 passed / 2 skipped，npx tsc --noEmit、npm run build、npx eslint src/*.ts（0 errors）全部通过。
+- 已提交（hash：`8d085b6`），尚未推送。
+- 无 DLEVENT / 生成文件路径 / dsh-home 约定改动；未拆 chat-view.ts / dsh-runner.ts。
+
 ### 最近交接摘要（P2-H linkifyAnswer 缓存 + vault 变更失效，2026-09-03，已提交 7d453d3，未推送）
 - 已完成：**P2-H linkifyAnswer 缓存**（剩余任务「下一批低风险代码修复」）。
 - 改动文件：
@@ -120,7 +129,7 @@
 - [x] 生成文件原子写：`ensurePluginDshHome` / `ensureVaultPatch` / `ensureSkillDirsPatch` 改为 tmp + rename，参考 `HistoryStore.save`（提交 hash：`c68aa17`；未推送）
 - [x] `HistoryStore.titleFromTurn` 默认标题走 `t('chat.newSession')`，去掉硬编码中文 `'新会话'`（提交 hash：`84596f0`；未推送）
 - [x] `linkifyAnswer` 缓存 vault 文件/别名列表，并监听 vault 变更失效，避免每次回答全库扫描（提交 hash：`7d453d3`，未推送）
-- [ ] `scanSkills` 缓存或异步化，避免每次打开面板/触发建议时同步读盘
+- [x] `scanSkills` 缓存或异步化，避免每次打开面板/触发建议时同步读盘（提交 hash：`8d085b6`，未推送）
 - [x] `settings.ts` 中 E 项新增代码的缩进/空行整理（功能正常，可读性一般）；i18n 新 key 缩进已对齐
 
 #### 3. 运行生命周期与降级可见化（中等风险，建议单独做，仍不拆大结构）
@@ -480,7 +489,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 4. [x] API Key 存储风险有提示（P2-D：settings.apiKey.warning 风险提示；提交 hash：`ad61a92`）。
 5. [x] 生成文件统一原子写（`writeFileAtomicSync`，settings.yaml / vault.yml(.bak) / stream-relay.js / stream.yml / skill-dirs.yml；提交 hash：`c68aa17`）。
 6. [x] `HistoryStore` 默认标题走 i18n（`titleFromTurn` 兜底用 `t('chat.newSession')`；提交 hash：`84596f0`）。
-7. [x] linkifyAnswer 有缓存（P2-H，提交 `7d453d3`，未推送）；scanSkills 缓存/异步化仍待办（P2-I）。
+7. [x] linkifyAnswer 有缓存（P2-H，提交 `7d453d3`，未推送）；scanSkills 有缓存（P2-I，提交 `8d085b6`，未推送）。
 8. 运行中关闭面板/卸载时状态与部分轮次处理完整。
 9. DSH_HOME / patch / workdir 降级失败在 UI 可见。
 10. [x] `DshSettings` 相关字段改为 union 类型并做加载校验。
