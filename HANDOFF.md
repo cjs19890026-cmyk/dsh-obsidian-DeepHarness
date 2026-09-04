@@ -18,6 +18,16 @@
 
 ## 当前交接重点：第一/二阶段已完成，下面为剩余任务
 
+### 最近交接摘要（发布前必办：obsidian 版本固定 + Actions v4 + tag/manifest 校验，2026-09-03，已提交 6e7f257 / dddb738，未推送）
+- 已完成：**剩余任务第 1 节「发布前必须完成」全部 3 条**。
+- 改动：
+  - package.json：`"obsidian": "latest"` 固定为精确 `"1.13.1"`（与 node_modules / lock 内 `node_modules/obsidian` 1.13.1 一致；typings 继续支持 1.13 声明式设置 API，manifest minAppVersion 1.13.0）。
+  - package-lock.json：root devDependencies spec 同步为 `"1.13.1"`（`npm install --package-lock-only --offline` 生成；`npm ci --dry-run` 通过）。提交 hash：`6e7f257`。
+  - .github/workflows/release.yml：checkout/setup-node v3→v4；新增「Assert tag matches manifest version」步骤（`GITHUB_REF#refs/tags/` 去 v 后须等于 manifest.json.version，不等则 ::error:: + exit 1）。
+  - .github/workflows/ci.yml：checkout/setup-node v3→v4。提交 hash：`dddb738`。
+- 验证基线：npm test = 121 passed / 2 skipped，npx tsc --noEmit、npm run build、npx eslint src/*.ts（0 errors）全部通过；tag 比对脚本本地模拟通过。
+- 均未推送。无 DLEVENT / 生成路径 / dsh-home 约定改动；无 UI / i18n 改动。
+
 ### 最近交接摘要（P2-I scanSkills 缓存 + 失效，2026-09-03，已提交 8d085b6，未推送）
 - 已完成：**P2-I scanSkills 缓存**（剩余任务「下一批低风险代码修复」）。
 - 改动文件：
@@ -118,9 +128,9 @@
 ### 剩余任务（按建议顺序）
 
 #### 1. 发布前必须完成（风险低，不改 UI 行为）
-- [ ] 固定 `package.json` 中 `"obsidian": "latest"` 为精确 Obsidian API 版本，并重新生成/同步 `package-lock.json`
-- [ ] 更新 `.github/workflows/release.yml` 使用 `actions/checkout@v4`、`actions/setup-node@v4`（可选但推荐）
-- [ ] release 流程校验 tag 与 `manifest.json` 版本一致（防发错版本）
+- [x] 固定 `package.json` 中 `"obsidian": "latest"` 为精确 Obsidian API 版本，并重新生成/同步 `package-lock.json`（提交 hash：`6e7f257`，未推送）
+- [x] 更新 `.github/workflows/release.yml` 使用 `actions/checkout@v4`、`actions/setup-node@v4`（可选但推荐）；`.github/workflows/ci.yml` 同步升级（提交 hash：`dddb738`，未推送）
+- [x] release 流程校验 tag 与 `manifest.json` 版本一致（防发错版本）（提交 hash：`dddb738`，未推送）
 
 #### 2. 下一批低风险代码修复（小步做，每步跑 npm test / tsc / build）
 - [x] `DshClient` 依赖注入 `spawn` / `setTimeout` / `clearTimeout`，替代当前测试里的 `window` shim，并补 fake spawn 参数/env/error 测试（提交 hash：`0427336`）
@@ -483,7 +493,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 6. `extraSkillDirs` 不能通过绝对路径或 `../` 逃出 vault，并有测试。
 
 ### 剩余验收（按上一节剩余任务逐项完成）
-1. `package.json` 固定 `obsidian` 版本并同步 lockfile。
+1. [x] `package.json` 固定 `obsidian` 版本并同步 lockfile（`1.13.1`，提交 `6e7f257`，未推送）。
 2. [x] `DshClient` 可注入 `spawn` / timer，测试不再依赖 `window` shim。（提交 hash：`0427336`）
 3. [x] 子进程 env 白名单化（`src/dsh-client.ts` 的 `DSH_ENV_ALLOWLIST` + `buildDshEnv`，+8 测试）。
 4. [x] API Key 存储风险有提示（P2-D：settings.apiKey.warning 风险提示；提交 hash：`ad61a92`）。
