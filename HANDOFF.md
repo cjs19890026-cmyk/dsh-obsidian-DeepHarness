@@ -18,6 +18,17 @@
 
 ## 当前交接重点：第一/二阶段已完成，下面为剩余任务
 
+### 最近交接摘要（P2-H linkifyAnswer 缓存 + vault 变更失效，2026-09-03，已提交 7d453d3，未推送）
+- 已完成：**P2-H linkifyAnswer 缓存**（剩余任务「下一批低风险代码修复」）。
+- 改动文件：
+  - src/pure.ts：新增纯函数 `frontmatterAliases(raw)`（数组 / 逗号分隔字符串 / 垃圾值 → string[]），从 chat-view 的别名解析抽出。
+  - src/pure.test.ts：+3 测试（数组含非字符串元素 / 逗号串去空 / 非数组非字符串垃圾）。
+  - src/chat-view.ts：新增 `linkifyEntries: NoteTitleEntry[] | null` 缓存 + `collectNoteInfos()`；`linkifyAnswer` 仅在缓存为空时全库扫描；`onOpen` 里 `registerEvent(vault.on create/delete/rename/modify)` 置脏缓存（视图卸载自动解绑）。
+- 效果：单条回答、会话恢复渲染多条历史消息时不再每条全库 `getMarkdownFiles()` + 读 metadataCache；vault 实际变更后下一次回答自动重建索引。行为/文案零变化。
+- 验证基线：npm test = 121 passed / 2 skipped（原 118 + 3），npx tsc --noEmit、npm run build、npx eslint src/*.ts（0 errors）全部通过。
+- 已提交（hash：`7d453d3`），尚未推送。
+- 无 DLEVENT / 生成文件路径 / dsh-home 约定改动；未拆 chat-view.ts / dsh-runner.ts。
+
 ### 最近交接摘要（P1-5 设置选项 union 化 + 加载时非法值回退，2026-09-03，已提交 2b039a1，未推送）
 - 已完成：**P1-5 `DshSettings` 选项字段收窄 + `loadSettings` 非法值回退**（剩余任务「运行生命周期与降级可见化」首条）。
 - 改动文件：
@@ -108,7 +119,7 @@
 - [x] P2-D：设置页补 API Key 明文存储风险提示；keychain 经评估暂不引入（settings.apiKey.warning + .dsh-setting-warning）
 - [x] 生成文件原子写：`ensurePluginDshHome` / `ensureVaultPatch` / `ensureSkillDirsPatch` 改为 tmp + rename，参考 `HistoryStore.save`（提交 hash：`c68aa17`；未推送）
 - [x] `HistoryStore.titleFromTurn` 默认标题走 `t('chat.newSession')`，去掉硬编码中文 `'新会话'`（提交 hash：`84596f0`；未推送）
-- [ ] `linkifyAnswer` 缓存 vault 文件/别名列表，并监听 vault 变更失效，避免每次回答全库扫描
+- [x] `linkifyAnswer` 缓存 vault 文件/别名列表，并监听 vault 变更失效，避免每次回答全库扫描（提交 hash：`7d453d3`，未推送）
 - [ ] `scanSkills` 缓存或异步化，避免每次打开面板/触发建议时同步读盘
 - [x] `settings.ts` 中 E 项新增代码的缩进/空行整理（功能正常，可读性一般）；i18n 新 key 缩进已对齐
 
@@ -469,7 +480,7 @@ export type ToolExecutionMode = '' | 'native' | 'code' | 'both';
 4. [x] API Key 存储风险有提示（P2-D：settings.apiKey.warning 风险提示；提交 hash：`ad61a92`）。
 5. [x] 生成文件统一原子写（`writeFileAtomicSync`，settings.yaml / vault.yml(.bak) / stream-relay.js / stream.yml / skill-dirs.yml；提交 hash：`c68aa17`）。
 6. [x] `HistoryStore` 默认标题走 i18n（`titleFromTurn` 兜底用 `t('chat.newSession')`；提交 hash：`84596f0`）。
-7. linkify / skill 扫描有缓存或异步化。
+7. [x] linkifyAnswer 有缓存（P2-H，提交 `7d453d3`，未推送）；scanSkills 缓存/异步化仍待办（P2-I）。
 8. 运行中关闭面板/卸载时状态与部分轮次处理完整。
 9. DSH_HOME / patch / workdir 降级失败在 UI 可见。
 10. [x] `DshSettings` 相关字段改为 union 类型并做加载校验。
