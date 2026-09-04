@@ -47,8 +47,9 @@ function newId(): string {
 }
 
 function titleFromTurn(user: string): string {
-  const t = user.replace(/\s+/g, ' ').trim();
-  return t.length > 30 ? `${t.slice(0, 30)}…` : t || '新会话';
+  // Local name is not `t` so it never shadows the imported i18n t().
+  const title = user.replace(/\s+/g, ' ').trim();
+  return title.length > 30 ? `${title.slice(0, 30)}…` : title || t('chat.newSession');
 }
 
 export class HistoryStore {

@@ -183,7 +183,7 @@ Copy-Item dist\main.js, dist\manifest.json, dist\styles.css "$V\.obsidian\plugin
 
 - **技能按钮**（🔧）列出 DSH 发现的全部技能（名称 + 描述 + 来源），点击把 `/技能名 ` 插入输入框。
 - 输入 `/` 弹出技能补全；DSH 原生识别 `/名称` 斜杠调用并自动注入技能全文。
-- 内置 `obsidian` 技能之外，可配置附加技能目录（默认扫描 `Library/Skills`、`.claude/skills`）。
+- 内置 `obsidian` 技能之外，可**可选**添加你 vault 里存放技能的其他文件夹：设置里点「选择文件夹…」直接挑选即可（无需手输路径），技能面板与 `/技能名` 调用会同步发现；留空则只用内置与自动发现（`.dsh/skills`）的技能。
 
 ---
 
@@ -207,7 +207,7 @@ Copy-Item dist\main.js, dist\manifest.json, dist\styles.css "$V\.obsidian\plugin
 | 显示工具调用 | 开 | 执行 bash / 文件等工具时显示调用记录 |
 | 历史记录条数 | 50 | 历史面板最多保留的会话数，超出删最旧 |
 | 内置 Obsidian 技能 | 开 | 注入 `obsidian` skill（vault 约定 + 长期记忆） |
-| 附加技能目录 | `Library/Skills, .claude/skills` | 逗号分隔的 vault 相对目录，注册给 DSH skill 系统 |
+| 附加技能文件夹（可选） | 空 | vault 内存放 SKILL.md 技能的文件夹，逗号分隔；设置里点「选择文件夹…」挑选，技能面板与 `/技能名` 调用会扫描并注册给 DSH |
 | 语言 | auto | 插件界面语言（en / 中文） |
 | 自定义 persona | 空 | 追加指令到 agent 系统提示词 |
 

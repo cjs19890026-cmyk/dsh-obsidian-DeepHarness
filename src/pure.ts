@@ -2,6 +2,7 @@
  * Obsidian-free pure helpers, extracted so they can be unit-tested in Node
  * without pulling in the `obsidian` API.
  */
+import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { t } from './i18n';
 
@@ -58,6 +59,64 @@ export function parseHeadlessOutput(stdout: string): string {
   return answerParts.join('\n').trim();
 }
 
+/**
+ * One real-time event parsed from a `DLEVENT\t<json>` stdout line.
+ * The stream relay emits these for reasoning increments and tool calls.
+ */
+export type DshStreamEvent =
+  | { t: 'think'; text: string }
+  | { t: 'tool'; status: 'start'; id: string; name: string; args: string; argsFull?: string }
+  | { t: 'tool'; status: 'result'; id?: string; ok: boolean; summary?: string };
+
+const DLEVENT_PREFIX = 'DLEVENT\t';
+
+/**
+ * Parse a single raw stream-relay stdout line into a typed DshStreamEvent.
+ *
+ * Non-DLEVENT lines, malformed JSON, and shapes outside the known relay
+ * protocol return null. This is the pure half of the inline parser previously
+ * embedded in ChatView.handleStreamLine; it does not perform any UI work.
+ */
+export function parseDshEventLine(line: string): DshStreamEvent | null {
+  if (!line.startsWith(DLEVENT_PREFIX)) return null;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(line.slice(DLEVENT_PREFIX.length));
+  } catch {
+    return null;
+  }
+  if (typeof raw !== 'object' || raw === null) return null;
+  const obj = raw as Record<string, unknown>;
+
+  if (obj.t === 'think' && typeof obj.text === 'string') {
+    return { t: 'think', text: obj.text };
+  }
+
+  if (obj.t === 'tool' && typeof obj.status === 'string') {
+    if (obj.status === 'start' && typeof obj.id === 'string') {
+      return {
+        t: 'tool',
+        status: 'start',
+        id: obj.id,
+        name: typeof obj.name === 'string' ? obj.name : 'tool',
+        args: typeof obj.args === 'string' ? obj.args : '',
+        ...(typeof obj.argsFull === 'string' ? { argsFull: obj.argsFull } : {}),
+      };
+    }
+    if (obj.status === 'result' && typeof obj.ok === 'boolean') {
+      return {
+        t: 'tool',
+        status: 'result',
+        ...(typeof obj.id === 'string' ? { id: obj.id } : {}),
+        ok: obj.ok,
+        ...(typeof obj.summary === 'string' ? { summary: obj.summary } : {}),
+      };
+    }
+  }
+  return null;
+}
+
+
 /** Map a dsh error CODE to a user-friendly message; null = unknown code. */
 export function errorHint(code: string): string | null {
   switch (code) {
@@ -110,4 +169,67 @@ export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
 /** Resolve the context window for a model id (safe default). */
 export function contextWindowFor(model: string): number {
   return MODEL_CONTEXT_WINDOWS[model] ?? DEFAULT_CONTEXT_WINDOW;
+}
+
+/**
+ * Resolve a user-configured, vault-relative directory against the vault root.
+ *
+ * Guards every consumer of `extraSkillDirs` (the skill UI scan and the DSH
+ * skill-dirs patch): the setting is documented as "vault-relative folders",
+ * so an absolute path or a `../` sequence must never move the skill boundary
+ * outside the vault.
+ *
+ * Returns the absolute directory, or null when the input is empty, is an
+ * absolute path, or would escape the vault root via `..`.
+ */
+export function resolveVaultRelativeDir(vaultRoot: string, rel: string): string | null {
+  const t = rel.trim();
+  if (!t) return null;
+  // Absolute paths ('/…' on POSIX, 'C:\…' on Windows) are never vault-relative.
+  if (path.isAbsolute(t)) return null;
+  const base = path.resolve(vaultRoot, t);
+  const relToRoot = path.relative(vaultRoot, base);
+  // `..` / `../…` escape the vault; an absolute relToRoot can only happen on
+  // Windows across different drives, which is an escape as well.
+  if (relToRoot === '..' || relToRoot.startsWith('..' + path.sep) || path.isAbsolute(relToRoot)) {
+    return null;
+  }
+  return base;
+}
+
+/**
+ * Normalize the Obsidian `aliases` frontmatter value (array, comma-separated
+ * string, or garbage) into a clean string list.
+ *
+ * Extracted from ChatView.linkifyAnswer (P2-H) so the fiddly parsing can be
+ * unit-tested Obsidian-free; used to build the vault-note title index.
+ */
+export function frontmatterAliases(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map(String);
+  if (typeof raw === 'string') {
+    return raw.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+/**
+ * P2-K: decide whether an interrupted run (view closed / plugin unloaded while
+ * the task ran) produced partial content worth keeping as a history turn, and
+ * what answer text to store for it.
+ *
+ * Returns:
+ *  - the partial final answer from stdout (DLEVENT lines stripped) when non-empty,
+ *  - the caller's `marker` when only thinking / tool activity arrived,
+ *  - null when nothing meaningful was produced (record nothing).
+ */
+export function partialTurnAnswer(
+  partialStdout: string,
+  thinking: string,
+  hasTools: boolean,
+  marker: string,
+): string | null {
+  const answer = parseHeadlessOutput(partialStdout).trim();
+  if (answer) return answer;
+  if (thinking.trim() || hasTools) return marker;
+  return null;
 }

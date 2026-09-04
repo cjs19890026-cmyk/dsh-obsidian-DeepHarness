@@ -1,14 +1,14 @@
 import * as path from 'path';
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, setIcon, Menu, MarkdownView, Keymap } from 'obsidian';
 import type DshPlugin from './main';
-import { DshClient } from './dsh-client';
-import { DshRunner } from './dsh-runner';
-import { buildTitleEntries, linkifyNoteTitles, type NoteInfo } from './linkify';
+import { DshClient, type DshRunResult } from './dsh-client';
+import { DshRunner, type PreparationIssue } from './dsh-runner';
+import { buildTitleEntries, linkifyNoteTitles, type NoteInfo, type NoteTitleEntry } from './linkify';
 import { scanSkillRoots, type SkillEntry, type ScanRoot } from './skills';
 import { SkillSuggest } from './skill-suggest';
-import { MODEL_OPTIONS, REASONING_OPTIONS, PERMISSION_OPTIONS, permissionLabel } from './settings';
+import { MODEL_OPTIONS, REASONING_OPTIONS, PERMISSION_OPTIONS, permissionLabel, type PermissionMode } from './settings';
 import { ContextMeter, estimateTokens } from './context-meter';
-import { parseHeadlessOutput, errorHint, contextWindowFor } from './pure';
+import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir, frontmatterAliases, partialTurnAnswer } from './pure';
 import { HistoryTool } from './history';
 import { MentionSuggest } from './mention';
 import { ChipEditor } from './chip-editor';
@@ -61,12 +61,24 @@ export class ChatView extends ItemView {
   private contextMeter: ContextMeter | null = null;
   private settingsUnsub: (() => void) | null = null;
   private localeUnsub: (() => void) | null = null;
+  /** P2-H: cached wikilink title index; invalidated when the vault changes. */
+  private linkifyEntries: NoteTitleEntry[] | null = null;
+  /** P2-I: cached skill catalog (keyed by scanned roots); invalidated on
+   *  vault/settings changes instead of on every panel open / suggestion. */
+  private skillCache: { key: string; skills: SkillEntry[] } | null = null;
+  /** P2-K: the view (or the plugin) has been torn down. Once true, an
+   *  in-flight run's promise must never touch the DOM again — it may only
+   *  persist an optional partial turn. Set by onClose() / shutdownForUnload(). */
+  private closed = false;
 
   constructor(leaf: WorkspaceLeaf, plugin: DshPlugin) {
     super(leaf);
     this.plugin = plugin;
     this.client = new DshClient();
     this.runner = new DshRunner(plugin.settings, plugin.app.vault.configDir);
+    // The plugin walks its open views on unload (Obsidian may skip onClose()),
+    // so every view joins the registry at birth and leaves on teardown.
+    plugin.registerChatView(this);
   }
 
   getViewType(): string {
@@ -98,6 +110,19 @@ export class ChatView extends ItemView {
         }
       }),
     );
+
+    // P2-H / P2-I: keep the linkify title index and the skill catalog caches
+    // in sync with the vault. Marking them dirty on any vault change is
+    // cheaper than scanning the whole vault / skill roots on every render,
+    // panel open or "/" suggestion; the scans happen again on next use.
+    const invalidateCaches = (): void => {
+      this.linkifyEntries = null;
+      this.skillCache = null;
+    };
+    this.registerEvent(this.app.vault.on('create', invalidateCaches));
+    this.registerEvent(this.app.vault.on('delete', invalidateCaches));
+    this.registerEvent(this.app.vault.on('rename', invalidateCaches));
+    this.registerEvent(this.app.vault.on('modify', invalidateCaches));
 
     // Header
     const header = container.createDiv({ cls: 'dsh-header' });
@@ -197,7 +222,12 @@ export class ChatView extends ItemView {
     this.updateTriggerLabels();
     // Reflect settings-tab changes (model / effort / permission) into the
     // trigger labels, which otherwise only refresh from our own menus.
-    this.settingsUnsub = this.plugin.onSettingsChange(() => this.updateTriggerLabels());
+    this.settingsUnsub = this.plugin.onSettingsChange(() => {
+      // extraSkillDirs feeds the skill catalog — drop the cache so the next
+      // panel open / suggestion rescans with the updated roots.
+      this.skillCache = null;
+      this.updateTriggerLabels();
+    });
     // Reflect language changes into every locale-dependent string in place,
     // so the panel refreshes without being closed/reopened.
     this.localeUnsub = this.plugin.onLocaleChange(() => this.refreshLocaleStrings());
@@ -291,25 +321,53 @@ export class ChatView extends ItemView {
   }
 
   /** Delegate to the plugin's single confirmation path, then refresh labels. */
-  private async applyPermissionMode(mode: string): Promise<void> {
+  private async applyPermissionMode(mode: PermissionMode): Promise<void> {
     await this.plugin.setPermissionMode(mode);
     this.updateTriggerLabels();
   }
 
   onClose(): Promise<void> {
+    this.teardown();
+    this.plugin.unregisterChatView(this);
+    return Promise.resolve();
+  }
+
+  /**
+   * Plugin-unload hook, called by DshPlugin.onunload() for every open chat
+   * view. Obsidian does NOT reliably call onClose() on each view before
+   * unload, so the plugin walks its view registry explicitly. Idempotent:
+   * safe even when Obsidian later calls onClose() as well.
+   */
+  shutdownForUnload(): void {
+    this.teardown();
+    this.plugin.unregisterChatView(this);
+  }
+
+  /**
+   * Shared view teardown (P2-K). Marks the view closed and stops any in-flight
+   * run so its promise settles through the closed-view path in sendMessage()
+   * — nothing may touch the DOM after this point. abort() reports the
+   * interruption as killReason 'user'; dispose() kills the child and drops the
+   * client from the plugin's live registry.
+   */
+  private teardown(): void {
+    this.closed = true;
+    this.abortController?.abort();
+    this.client.dispose();
     this.closeHistoryPanel();
     this.closeSkillPanel();
     this.mention?.dispose();
     this.mention = null;
     this.skillSuggest?.dispose();
     this.skillSuggest = null;
-    this.client.dispose();
-    if (this.statusTimer !== null) window.clearInterval(this.statusTimer);
+    if (this.statusTimer !== null) {
+      window.clearInterval(this.statusTimer);
+      this.statusTimer = null;
+    }
     this.settingsUnsub?.();
     this.settingsUnsub = null;
     this.localeUnsub?.();
     this.localeUnsub = null;
-    return Promise.resolve();
   }
 
   private showWelcome(): void {
@@ -344,6 +402,9 @@ export class ChatView extends ItemView {
     }
 
     const bin = await this.runner.detectBin();
+    // The view may be torn down while we await (close panel / plugin unload):
+    // never continue into a dead view — no DOM writes, no spawn.
+    if (this.closed) return;
     if (!bin) {
       this.renderMessage('assistant', `> ⚠️ ${t('chat.noDsh')}`, true);
       new Notice(t('chat.noDsh'), 6000);
@@ -352,6 +413,7 @@ export class ChatView extends ItemView {
     // Detect node + dsh's real script so we spawn `node bin.js` directly
     // (bypasses the shebang, which fails under Electron's restricted PATH).
     const nodeBin = await this.runner.detectNode();
+    if (this.closed) return;
     if (!nodeBin) {
       this.renderMessage('assistant', `> ⚠️ ${t('chat.noNode')}`, true);
       new Notice(t('chat.noNode'), 6000);
@@ -379,19 +441,28 @@ export class ChatView extends ItemView {
     if (this.contextMeter) {
       this.contextMeter.addTokens(PERSONA_FIXED_TOKENS + estimateTokens(task));
     }
-    const patches = await this.runner.ensureVaultPatch(vaultRoot);
-    const skillDirsPatch = this.runner.ensureSkillDirsPatch(vaultRoot);
+    // P1-3: preparation-step degradation (fallbacks / failed writes) is
+    // collected here and surfaced to the user before the run starts.
+    const prepIssues: PreparationIssue[] = [];
+    const patches = await this.runner.ensureVaultPatch(vaultRoot, prepIssues);
+    if (this.closed) return; // torn down during patch prep — do not start the run
+    const skillDirsPatch = this.runner.ensureSkillDirsPatch(vaultRoot, prepIssues);
     const patchPaths = [patches.persona, patches.think, skillDirsPatch].filter((p): p is string => p !== null);
     // Built-in obsidian skill + long-term memory seed.
-    this.runner.ensureObsidianSkill(vaultRoot);
-    this.runner.ensureMemoryFile(vaultRoot);
+    this.runner.ensureObsidianSkill(vaultRoot, prepIssues);
+    this.runner.ensureMemoryFile(vaultRoot, prepIssues);
     // Isolated DSH_HOME with the selected model + reasoning effort;
     // falls back to the user home when it cannot be prepared.
     const pluginHome = this.runner.ensurePluginDshHome(vaultRoot, {
       model: this.plugin.settings.model,
       effort: this.plugin.settings.reasoningEffort,
-    });
+    }, prepIssues);
     const dshHome = pluginHome ?? this.runner.dshHome();
+    const workdir = this.runner.workdir(vaultRoot, prepIssues);
+    // P1-3: preparation degraded (DSH_HOME fallback, patch / skill / memory
+    // write failures, workdir fallback…) — surface it once instead of running
+    // degraded silently.
+    if (prepIssues.length > 0) this.renderPreparationIssues(prepIssues);
 
     // Streaming assistant message: thinking + tools stream inline into the
     // message (web-UI style, no wrapper container), then the answer renders
@@ -432,71 +503,70 @@ export class ChatView extends ItemView {
     const toolsHistory: HistoryTool[] = [];
     let thinkingText = '';
     const handleStreamLine = (line: string): void => {
-      if (!line.startsWith('DLEVENT\t')) return;
-      let evt: { t?: string; text?: string; status?: string; id?: string; name?: string; args?: string; argsFull?: string; ok?: boolean; summary?: string };
-      try {
-        evt = JSON.parse(line.slice('DLEVENT\t'.length)) as typeof evt;
-      } catch {
-        return;
-      }
-      if (evt.t === 'think' && typeof evt.text === 'string') {
+      // The view/plugin may be torn down between the kill request and the
+      // child actually exiting — nothing may stream into a dead DOM (P2-K).
+      if (this.closed) return;
+      const evt = parseDshEventLine(line);
+      if (!evt) return;
+      if (evt.t === 'think') {
         thinkingText += evt.text;
         if (thinkBody) {
           thinkBody.setText(thinkingText.length > 4000 ? `…${thinkingText.slice(-4000)}` : thinkingText);
         }
         this.scrollToBottom();
-      } else if (evt.t === 'tool' && evt.status) {
-        if (!toolsWrap) return; // tool display disabled
-        if (evt.status === 'start' && evt.id) {
-          // One tool call block: clickable header + expanded content
-          const call = toolsWrap.createDiv({ cls: 'dsh-tool-call' });
-          const header = call.createEl('button', { cls: 'dsh-tool-header' });
-          const icon = header.createSpan({ cls: 'dsh-tool-icon' });
-          setIcon(icon, 'wrench');
-          header.createSpan({ cls: 'dsh-tool-name', text: evt.name ?? 'tool' });
-          header.createSpan({ cls: 'dsh-tool-summary', text: evt.args ?? '' });
-          const status = header.createSpan({ cls: 'dsh-tool-status status-running' });
-          setIcon(status, 'loader-circle');
-          const chevron = header.createSpan({ cls: 'dsh-tool-chevron' });
-          setIcon(chevron, 'chevron-right');
-          const content = call.createDiv({ cls: 'dsh-tool-content hidden' });
-          // Show the full arguments (the detailed command) right away
-          if (evt.argsFull) {
-            content.createDiv({ cls: 'dsh-tool-cmd', text: evt.argsFull });
-          }
-          header.onclick = () => {
-            const collapsed = content.classList.contains('hidden');
-            content.classList.toggle('hidden', !collapsed);
-            setIcon(chevron, collapsed ? 'chevron-down' : 'chevron-right');
-          };
-          toolRows.set(evt.id, { status, chevron, content, name: evt.name ?? 'tool', args: evt.argsFull ?? evt.args ?? '' });
-        } else if (evt.status === 'result') {
-          const entry = evt.id ? toolRows.get(evt.id) : undefined;
-          if (entry) {
-            entry.status.classList.remove('status-running');
-            if (evt.ok) {
-              entry.status.classList.add('status-completed');
-              setIcon(entry.status, 'check');
-            } else {
-              entry.status.classList.add('status-error');
-              setIcon(entry.status, 'x');
-            }
-            const lineText = evt.summary
-              ? evt.summary
-              : evt.ok ? t('chat.toolNoOutput') : t('chat.toolFailed');
-            // Tools stay collapsed by default; result visible when expanded.
-            entry.content.createDiv({ cls: 'dsh-tool-line', text: lineText });
-            // Collect for history
-            toolsHistory.push({
-              name: entry.name,
-              args: entry.args,
-              ok: evt.ok !== false,
-              summary: evt.summary || undefined,
-            });
-          }
-        }
-        this.scrollToBottom();
+        return;
       }
+      // evt.t === 'tool'
+      if (!toolsWrap) return; // tool display disabled
+      if (evt.status === 'start') {
+        // One tool call block: clickable header + expanded content
+        const call = toolsWrap.createDiv({ cls: 'dsh-tool-call' });
+        const header = call.createEl('button', { cls: 'dsh-tool-header' });
+        const icon = header.createSpan({ cls: 'dsh-tool-icon' });
+        setIcon(icon, 'wrench');
+        header.createSpan({ cls: 'dsh-tool-name', text: evt.name });
+        header.createSpan({ cls: 'dsh-tool-summary', text: evt.args });
+        const status = header.createSpan({ cls: 'dsh-tool-status status-running' });
+        setIcon(status, 'loader-circle');
+        const chevron = header.createSpan({ cls: 'dsh-tool-chevron' });
+        setIcon(chevron, 'chevron-right');
+        const content = call.createDiv({ cls: 'dsh-tool-content hidden' });
+        // Show the full arguments (the detailed command) right away
+        if (evt.argsFull) {
+          content.createDiv({ cls: 'dsh-tool-cmd', text: evt.argsFull });
+        }
+        header.onclick = () => {
+          const collapsed = content.classList.contains('hidden');
+          content.classList.toggle('hidden', !collapsed);
+          setIcon(chevron, collapsed ? 'chevron-down' : 'chevron-right');
+        };
+        toolRows.set(evt.id, { status, chevron, content, name: evt.name, args: evt.argsFull ?? evt.args });
+      } else {
+        const entry = evt.id ? toolRows.get(evt.id) : undefined;
+        if (entry) {
+          entry.status.classList.remove('status-running');
+          if (evt.ok) {
+            entry.status.classList.add('status-completed');
+            setIcon(entry.status, 'check');
+          } else {
+            entry.status.classList.add('status-error');
+            setIcon(entry.status, 'x');
+          }
+          const lineText = evt.summary
+            ? evt.summary
+            : evt.ok ? t('chat.toolNoOutput') : t('chat.toolFailed');
+          // Tools stay collapsed by default; result visible when expanded.
+          entry.content.createDiv({ cls: 'dsh-tool-line', text: lineText });
+          // Collect for history
+          toolsHistory.push({
+            name: entry.name,
+            args: entry.args,
+            ok: evt.ok,
+            summary: evt.summary || undefined,
+          });
+        }
+      }
+      this.scrollToBottom();
     };
 
     // Status line
@@ -508,7 +578,7 @@ export class ChatView extends ItemView {
         dshBin: bin,
         nodeBin,
         dshScript,
-        cwd: this.runner.workdir(vaultRoot),
+        cwd: workdir,
         dshHome,
         apiKey: this.plugin.settings.apiKey.trim() || undefined,
         provider: this.plugin.settings.provider,
@@ -522,9 +592,23 @@ export class ChatView extends ItemView {
 
       this.stopStatusTimer();
 
-      if (result.killed) {
-        // Stopped by user: keep it subtle — a small status note only.
+      if (this.closed) {
+        // P2-K: the view (or the plugin) went away while the task ran. The DOM
+        // is gone — never write to it. What the run produced before the kill
+        // is kept as a partial turn (when it is worth keeping) instead of
+        // being silently dropped.
+        this.savePartialTurn(message, thinkingText, toolsHistory, result);
+      } else if (result.killReason === 'user') {
+        // Stopped by the user: keep it subtle — a small status note only.
         statusEl.setText(`⏹ ${t('chat.cancelled')}`);
+        this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
+      } else if (result.killReason === 'timeout') {
+        // Auto-stopped after the configured timeout: surface it as an error
+        // with its own message, so it is never mistaken for a manual stop.
+        const msg = t('chat.timedOut');
+        statusEl.setText(`✗ ${msg}`);
+        statusEl.addClass('dsh-status-error');
+        contentEl.createSpan({ text: `> ❌ ${msg}`, cls: 'dsh-error-inline' });
         this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
       } else if (result.exitCode !== 0 || !result.stdout.trim()) {
         const errMsg = this.extractError(result.stderr);
@@ -560,6 +644,7 @@ export class ChatView extends ItemView {
       }
     } catch (e) {
       this.stopStatusTimer();
+      if (this.closed) return; // torn down mid-run: nothing to render
       const msg = e instanceof Error ? e.message : String(e);
       statusEl.setText(`✗ ${t('chat.failed', { message: msg })}`);
       statusEl.addClass('dsh-status-error');
@@ -568,9 +653,56 @@ export class ChatView extends ItemView {
     } finally {
       this.running = false;
       this.abortController = null;
-      this.resetButtonToSend();
-      this.scrollToBottom();
+      if (!this.closed) {
+        this.resetButtonToSend();
+        this.scrollToBottom();
+      }
     }
+  }
+
+  /**
+   * P2-K: persist an interrupted run (the view was closed / the plugin was
+   * unloaded while the task ran) as a partial turn, so reasoning + tool
+   * activity produced before the kill is not silently lost. Nothing is
+   * recorded when the run produced no content worth keeping.
+   */
+  private savePartialTurn(
+    message: string,
+    thinkingText: string,
+    tools: HistoryTool[],
+    result: DshRunResult,
+  ): void {
+    const answer = partialTurnAnswer(
+      result.stdout,
+      thinkingText,
+      tools.length > 0,
+      t('chat.runInterrupted'),
+    );
+    if (answer === null) return; // nothing worth keeping
+    void this.plugin.history?.addTurn({
+      ts: Date.now(),
+      user: message,
+      answer,
+      thinking: thinkingText.trim() || undefined,
+      tools: tools.length > 0 ? tools : undefined,
+      durationMs: result.durationMs,
+    }, {
+      model: this.plugin.settings.model,
+      effort: this.plugin.settings.reasoningEffort,
+      permission: this.plugin.settings.permissionMode,
+    });
+  }
+
+  /**
+   * P1-3: surface degraded preparation (DSH_HOME fallback, failed persona /
+   * stream / skill / memory writes, workdir fallback, rejected extra skill
+   * dirs) as one system message listing every issue, plus a Notice. The run
+   * still proceeds — but the user now sees that some capabilities are missing.
+   */
+  private renderPreparationIssues(issues: PreparationIssue[]): void {
+    const lines = issues.map((i) => `> - ${i.message}`);
+    this.renderMessage('assistant', [`> ⚠️ ${t('chat.degrade.title')}`, ...lines].join('\n'), true);
+    new Notice(t('chat.degrade.notice', { count: String(issues.length) }), 6000);
   }
 
   private stopRun(): void {
@@ -684,18 +816,21 @@ export class ChatView extends ItemView {
    * (copy / save-as-note keep the original answer).
    */
   private linkifyAnswer(text: string): string {
-    const files = this.app.vault.getMarkdownFiles();
-    const notes: NoteInfo[] = files.map((f) => {
+    if (!this.linkifyEntries) {
+      this.linkifyEntries = buildTitleEntries(this.collectNoteInfos());
+    }
+    return linkifyNoteTitles(text, this.linkifyEntries);
+  }
+
+  /** Collect one NoteInfo per markdown file (title, path, aliases). */
+  private collectNoteInfos(): NoteInfo[] {
+    return this.app.vault.getMarkdownFiles().map((f) => {
       let aliases: string[] = [];
       try {
         const fm = this.app.metadataCache.getFileCache(f)?.frontmatter as
           | { aliases?: unknown }
           | undefined;
-        const raw = fm?.aliases;
-        if (Array.isArray(raw)) aliases = raw.map(String);
-        else if (typeof raw === 'string') {
-          aliases = raw.split(',').map((s) => s.trim()).filter(Boolean);
-        }
+        aliases = frontmatterAliases(fm?.aliases);
       } catch {
         // metadata read failure: link by title only
       }
@@ -705,7 +840,6 @@ export class ChatView extends ItemView {
         aliases,
       };
     });
-    return linkifyNoteTitles(text, buildTitleEntries(notes));
   }
 
   /** Collapsible "思考过程" block (default collapsed, plain text). */
@@ -1135,17 +1269,33 @@ export class ChatView extends ItemView {
   }
 
   /** Roots mirroring DSH discovery + user-configured extra directories. */
-  private scanSkills(): SkillEntry[] {
-    const vaultRoot = this.plugin.getVaultRoot();
+  private scanRoots(vaultRoot: string): ScanRoot[] {
     const roots: ScanRoot[] = [
       { dir: path.join(vaultRoot, '.dsh', 'skills'), source: 'project' },
       { dir: path.join(vaultRoot, '.agents', 'skills'), source: 'project' },
       { dir: path.join(this.runner.pluginHomeDir(vaultRoot), 'skills'), source: 'plugin' },
     ];
     for (const rel of this.plugin.settings.extraSkillDirs.split(',')) {
-      const t = rel.trim();
-      if (t) roots.push({ dir: path.resolve(vaultRoot, t), source: 'extra' });
+      // Only vault-internal relative directories are scanned: absolute paths
+      // and `../` escapes are rejected (see resolveVaultRelativeDir).
+      const dir = resolveVaultRelativeDir(vaultRoot, rel);
+      if (dir) roots.push({ dir, source: 'extra' });
     }
-    return scanSkillRoots(roots);
+    return roots;
+  }
+
+  /**
+   * Skill catalog for the 🔧 panel and the "/" suggestions. Cached (P2-I):
+   * the sync readdirSync/readFileSync scan only reruns after a vault change
+   * or an extraSkillDirs edit, not on every panel open / popup trigger.
+   */
+  private scanSkills(): SkillEntry[] {
+    const vaultRoot = this.plugin.getVaultRoot();
+    // Key covers every input of the scan; cheap to compute per call.
+    const key = `${vaultRoot}\u0000${this.plugin.settings.extraSkillDirs.trim()}`;
+    if (this.skillCache && this.skillCache.key === key) return this.skillCache.skills;
+    const skills = scanSkillRoots(this.scanRoots(vaultRoot));
+    this.skillCache = { key, skills };
+    return skills;
   }
 }

@@ -1,7 +1,36 @@
 import { App, PluginSettingTab, Setting, type SettingDefinitionItem, type SettingDefinitionRender } from 'obsidian';
+import * as fs from 'fs';
+import * as path from 'path';
 import type DshPlugin from './main';
 import { t, Locale } from './i18n';
 import { DshRunner } from './dsh-runner';
+import { FolderSuggestModal } from './modals';
+
+/** Return an error message when a directory cannot be created/written. */
+function checkWritableDir(dir: string): string | null {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, `.deepharness-write-test-${Date.now()}`);
+    fs.writeFileSync(probe, 'ok', 'utf8');
+    fs.rmSync(probe, { force: true });
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+}
+
+/** Return an error message when an existing file cannot be opened for writing.
+ *  A missing settings.yaml is allowed if its parent directory is writable. */
+function checkWritableFile(file: string): string | null {
+  try {
+    if (!fs.existsSync(file)) return checkWritableDir(path.dirname(file));
+    const fd = fs.openSync(file, 'r+');
+    fs.closeSync(fd);
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+}
 
 export interface DshSettings {
   dshBin: string;
@@ -13,13 +42,13 @@ export interface DshSettings {
   language: 'auto' | Locale;
   customPersona: string;
   /** Tool execution backend: '' (default native) | 'native' | 'code' | 'both'. */
-  toolExecutionMode: string;
-  /** DeepSeek model id: deepseek-v4-flash | deepseek-v4-pro | deepseek-v4-flash-vision-exp. */
-  model: string;
-  /** Reasoning effort: off | high | max. */
-  reasoningEffort: string;
-  /** DSH sandbox mode: read-only | workspace-write | danger-full-access. */
-  permissionMode: string;
+  toolExecutionMode: ToolExecutionMode;
+  /** DeepSeek model id (one of MODEL_OPTIONS). */
+  model: ModelId;
+  /** Reasoning effort (one of REASONING_OPTIONS). */
+  reasoningEffort: ReasoningEffort;
+  /** DSH sandbox mode (one of PERMISSION_OPTIONS). */
+  permissionMode: PermissionMode;
   /** Show the thinking (reasoning) block in the chat. */
   showThinking: boolean;
   /** Show tool call blocks in the chat. */
@@ -33,7 +62,7 @@ export interface DshSettings {
   /** Plugin-only DeepSeek API key; empty = reuse the desktop DSH credentials. */
   apiKey: string;
   /** Model API backend used by the plugin's isolated DSH_HOME. */
-  provider: 'deepseek-official' | 'opencode-go';
+  provider: ProviderId;
 }
 
 export const DEFAULT_SETTINGS: DshSettings = {
@@ -53,7 +82,9 @@ export const DEFAULT_SETTINGS: DshSettings = {
   showTools: true,
   historyLimit: 50,
   obsidianSkill: true,
-  extraSkillDirs: 'Library/Skills, .claude/skills',
+  // Optional by design: novices should not inherit the creator's folders.
+  // Examples live in the placeholder/desc; pick via the "Browse…" button.
+  extraSkillDirs: '',
   apiKey: '',
   provider: 'deepseek-official',
 };
@@ -84,10 +115,76 @@ export const PERMISSION_OPTIONS = [
   { id: 'danger-full-access', label: 'Full access' },
 ] as const;
 
+/** Union types derived from the option lists above (see §4.5 of HANDOFF.md). */
+export type ProviderId = typeof PROVIDER_OPTIONS[number]['id'];
+export type ModelId = typeof MODEL_OPTIONS[number]['id'];
+export type ReasoningEffort = typeof REASONING_OPTIONS[number]['id'];
+export type PermissionMode = typeof PERMISSION_OPTIONS[number]['id'];
+
+/** Tool execution modes ('' = DSH default). Kept as an option list so the type
+ *  and the settings dropdown cannot drift apart. */
+export const TOOL_EXECUTION_MODES = ['', 'native', 'code', 'both'] as const;
+export type ToolExecutionMode = typeof TOOL_EXECUTION_MODES[number];
+
+/** Non-localized labels for the non-empty tool modes ('' shows the localized
+ *  'Default (native)' label). */
+const TOOL_EXECUTION_LABELS: Record<Exclude<ToolExecutionMode, ''>, string> = {
+  native: 'Native',
+  code: 'Code',
+  both: 'Both',
+};
+
 /** Label for a permission mode id (used in chat + settings). Never localized. */
-export function permissionLabel(id: string): string {
+export function permissionLabel(id: PermissionMode): string {
   const o = PERMISSION_OPTIONS.find((x) => x.id === id);
   return o ? o.label : id;
+}
+
+/** Option-backed DshSettings keys: their value must be one of a fixed list. */
+export type OptionFieldKey =
+  | 'provider'
+  | 'model'
+  | 'reasoningEffort'
+  | 'permissionMode'
+  | 'toolExecutionMode';
+
+/** The selectable ids for each option-backed key (used for load-time checks). */
+const OPTION_FIELD_IDS: Record<OptionFieldKey, readonly string[]> = {
+  provider: PROVIDER_OPTIONS.map((o) => o.id),
+  model: MODEL_OPTIONS.map((o) => o.id),
+  reasoningEffort: REASONING_OPTIONS.map((o) => o.id),
+  permissionMode: PERMISSION_OPTIONS.map((o) => o.id),
+  toolExecutionMode: [...TOOL_EXECUTION_MODES],
+};
+
+/**
+ * P1-5: validate settings read from the plugin data file and fall back to the
+ * DEFAULT_SETTINGS value whenever a stored option-backed field no longer
+ * matches the current option lists (e.g. a model id removed in a newer
+ * release, or a hand-edited data.json). Non-option fields keep their stored
+ * values. `reset` lists the option fields that were corrected, so the caller
+ * can heal the file and surface one notice.
+ */
+export function normalizeStoredSettings(
+  raw: unknown,
+): { settings: DshSettings; reset: OptionFieldKey[] } {
+  const stored = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
+  const settings = Object.assign({}, DEFAULT_SETTINGS, stored) as DshSettings;
+  const reset: OptionFieldKey[] = [];
+  // Fallbacks are written through a plain record: fields here are validated
+  // dynamically, and TypeScript cannot assign across distinct union keys via
+  // a single index access (their intersection is `never`).
+  const target = settings as unknown as Record<string, unknown>;
+  for (const field of Object.keys(OPTION_FIELD_IDS) as OptionFieldKey[]) {
+    if (!Object.prototype.hasOwnProperty.call(stored, field)) continue;
+    const allowed = OPTION_FIELD_IDS[field];
+    const value = stored[field];
+    if (typeof value !== 'string' || !allowed.includes(value)) {
+      target[field] = DEFAULT_SETTINGS[field];
+      reset.push(field);
+    }
+  }
+  return { settings, reset };
 }
 
 export class DshSettingTab extends PluginSettingTab {
@@ -163,6 +260,14 @@ export class DshSettingTab extends PluginSettingTab {
           }),
 
           render(t('settings.apiKey.name'), t('settings.apiKey.desc'), (setting) => {
+            // P2-D: surface the plaintext-storage risk while a plugin key is set
+            // (data.json lives inside the vault, so it syncs with the vault).
+            const warningEl = setting.descEl.createDiv({ cls: 'dsh-setting-warning' });
+            warningEl.setText(t('settings.apiKey.warning'));
+            const applyWarning = (): void => {
+              warningEl.style.display = s.apiKey ? '' : 'none';
+            };
+            applyWarning();
             setting.addText((text) => {
               text
                 .setPlaceholder(t('settings.apiKey.placeholder'))
@@ -170,6 +275,7 @@ export class DshSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                   s.apiKey = value.trim();
                   await this.plugin.saveSettings();
+                  applyWarning();
                 });
               text.inputEl.type = 'password';
               text.inputEl.autocomplete = 'off';
@@ -217,12 +323,12 @@ export class DshSettingTab extends PluginSettingTab {
 
           render(t('settings.toolMode.name'), t('settings.toolMode.desc'), (setting) => {
             setting.addDropdown((dd) => {
-              dd.addOption('', t('settings.toolModeDefault'));
-              dd.addOption('native', 'Native');
-              dd.addOption('code', 'Code');
-              dd.addOption('both', 'Both');
+              for (const mode of TOOL_EXECUTION_MODES) {
+                const label = mode === '' ? t('settings.toolModeDefault') : TOOL_EXECUTION_LABELS[mode];
+                dd.addOption(mode, label);
+              }
               dd.setValue(s.toolExecutionMode).onChange(async (value) => {
-                s.toolExecutionMode = value;
+                s.toolExecutionMode = value as ToolExecutionMode;
                 await this.plugin.saveSettings();
               });
             });
@@ -232,7 +338,7 @@ export class DshSettingTab extends PluginSettingTab {
             setting.addDropdown((dd) => {
               for (const m of MODEL_OPTIONS) dd.addOption(m.id, m.label);
               dd.setValue(s.model).onChange(async (value) => {
-                s.model = value;
+                s.model = value as ModelId;
                 await this.plugin.saveSettings();
               });
             });
@@ -242,7 +348,7 @@ export class DshSettingTab extends PluginSettingTab {
             setting.addDropdown((dd) => {
               for (const r of REASONING_OPTIONS) dd.addOption(r.id, r.label);
               dd.setValue(s.reasoningEffort).onChange(async (value) => {
-                s.reasoningEffort = value;
+                s.reasoningEffort = value as ReasoningEffort;
                 await this.plugin.saveSettings();
               });
             });
@@ -252,7 +358,7 @@ export class DshSettingTab extends PluginSettingTab {
             setting.addDropdown((dd) => {
               for (const p of PERMISSION_OPTIONS) dd.addOption(p.id, permissionLabel(p.id));
               dd.setValue(s.permissionMode).onChange(async (value) => {
-                await this.plugin.setPermissionMode(value);
+                await this.plugin.setPermissionMode(value as PermissionMode);
                 dd.setValue(s.permissionMode);
               });
             });
@@ -304,6 +410,19 @@ export class DshSettingTab extends PluginSettingTab {
                 s.extraSkillDirs = value;
                 await this.plugin.saveSettings();
               }));
+            // Folder picker: novice-friendly way to add vault folders without
+            // typing a path (picked folders are vault-internal by construction).
+            setting.addButton((button) => button
+              .setButtonText(t('settings.extraSkillDirs.pick'))
+              .onClick(() => {
+                new FolderSuggestModal(this.app, (picked) => {
+                  const existing = s.extraSkillDirs.split(',').map((x) => x.trim()).filter(Boolean);
+                  if (!existing.includes(picked)) existing.push(picked);
+                  s.extraSkillDirs = existing.join(', ');
+                  void this.plugin.saveSettings();
+                  this.update();
+                }).open();
+              }));
           }),
 
           render(t('settings.persona.name'), t('settings.persona.desc'), (setting) => {
@@ -343,7 +462,30 @@ export class DshSettingTab extends PluginSettingTab {
                   const nodeLine = setting.settingEl.createEl('p', { cls: 'dsh-check-fail' });
                   nodeLine.setText(t('settings.checkNoNode'));
                 }
+                  // on click: check writable plugin paths
+                  const vaultRoot = this.plugin.getVaultRoot();
+                  const configDir = this.plugin.app.vault.configDir;
+                  const generatedDir = path.join(vaultRoot, configDir, 'plugins', 'deepharness', 'generated');
+                  const pluginHomeDir = path.join(vaultRoot, configDir, 'plugins', 'deepharness', 'dsh-home');
+                  const settingsYaml = path.join(pluginHomeDir, 'settings.yaml');
+                  const writeChecks: Array<{ path: string; isFile: boolean; label: string }> = [
+                    { path: generatedDir, isFile: false, label: t('settings.check.generatedDir') },
+                    { path: pluginHomeDir, isFile: false, label: t('settings.check.dshHomeDir') },
+                    { path: settingsYaml, isFile: true, label: t('settings.check.settingsYaml') },
+                  ];
+                  for (const check of writeChecks) {
+                    const error = check.isFile ? checkWritableFile(check.path) : checkWritableDir(check.path);
+                    const checkLine = setting.settingEl.createEl('p', {
+                      cls: error ? 'dsh-check-fail' : 'dsh-check-ok',
+                    });
+                    const display = `${check.path} (${check.label})`;
+                    checkLine.setText(error
+                      ? t('settings.check.writableFail', { path: display, message: error })
+                      : t('settings.check.writableOk', { path: display }));
+                  }
+
               }));
+
           }),
 
           {

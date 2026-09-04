@@ -824,6 +824,11 @@
   color: var(--text-error);
 }
 
+/* Inline risk warning shown under the API key setting (P2-D). */
+.dsh-setting-warning {
+  color: var(--text-warning, #d29922);
+}
+
 /* ── History modal ──────────────────────────────────────── */
 .dsh-history-modal {
   max-width: 520px;

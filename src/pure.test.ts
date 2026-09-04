@@ -3,12 +3,16 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   parseHeadlessOutput,
+  parseDshEventLine,
   errorHint,
   versionCmp,
   contextWindowFor,
   MODEL_CONTEXT_WINDOWS,
   streamRelayPatchYaml,
   shimJsTarget,
+  resolveVaultRelativeDir,
+  frontmatterAliases,
+  partialTurnAnswer,
 } from './pure';
 import { estimateTokens } from './context-meter';
 
@@ -47,6 +51,55 @@ describe('parseHeadlessOutput', () => {
     expect(parseHeadlessOutput('')).toBe('');
   });
 });
+
+describe('parseDshEventLine', () => {
+  it('parses think events with string text', () => {
+    expect(parseDshEventLine('DLEVENT\t{"t":"think","text":"hello"}'))
+      .toEqual({ t: 'think', text: 'hello' });
+  });
+
+  it('parses tool start events and fills optional display fields', () => {
+    expect(parseDshEventLine(
+      'DLEVENT\t{"t":"tool","status":"start","id":"call-1","name":"bash","args":"ls","argsFull":"{\\"cmd\\":\\"ls\\"}"}',
+    )).toEqual({
+      t: 'tool',
+      status: 'start',
+      id: 'call-1',
+      name: 'bash',
+      args: 'ls',
+      argsFull: '{"cmd":"ls"}',
+    });
+  });
+
+  it('parses tool result events with ok false and summary', () => {
+    expect(parseDshEventLine(
+      'DLEVENT\t{"t":"tool","status":"result","id":"call-1","ok":false,"summary":"boom"}',
+    )).toEqual({
+      t: 'tool',
+      status: 'result',
+      id: 'call-1',
+      ok: false,
+      summary: 'boom',
+    });
+  });
+
+  it('returns null for non-DLEVENT lines', () => {
+    expect(parseDshEventLine('plain output')).toBeNull();
+    expect(parseDshEventLine('DLEVENT')).toBeNull();
+  });
+
+  it('returns null for malformed JSON', () => {
+    expect(parseDshEventLine('DLEVENT\t{"t":"think",}')).toBeNull();
+  });
+
+  it('returns null for unknown or incomplete event shapes', () => {
+    expect(parseDshEventLine('DLEVENT\t{"t":"nope"}')).toBeNull();
+    expect(parseDshEventLine('DLEVENT\t{"t":"think"}')).toBeNull();
+    expect(parseDshEventLine('DLEVENT\t{"t":"tool","status":"start"}')).toBeNull();
+    expect(parseDshEventLine('DLEVENT\t{"t":"tool","status":"result","id":"x"}')).toBeNull();
+  });
+});
+
 
 describe('errorHint', () => {
   it('maps credential codes to a hint', () => {
@@ -181,5 +234,82 @@ describe('shimJsTarget', () => {
   it('returns null for non-shim content', () => {
     expect(shimJsTarget('#!/usr/bin/env node\nconsole.log(1)')).toBeNull();
     expect(shimJsTarget('random text')).toBeNull();
+  });
+});
+
+describe('resolveVaultRelativeDir (extraSkillDirs boundary)', () => {
+  // Path math only — nothing is read from / written to the filesystem.
+  const vault = path.join(path.sep, 'Users', 'me', 'Vault');
+
+  it('accepts a plain vault-relative subfolder', () => {
+    expect(resolveVaultRelativeDir(vault, 'Library/Skills'))
+      .toBe(path.join(vault, 'Library', 'Skills'));
+  });
+
+  it('accepts nested folders, whitespace and "."', () => {
+    expect(resolveVaultRelativeDir(vault, 'a/b/c')).toBe(path.join(vault, 'a', 'b', 'c'));
+    expect(resolveVaultRelativeDir(vault, '  Skills  ')).toBe(path.join(vault, 'Skills'));
+    expect(resolveVaultRelativeDir(vault, '.')).toBe(vault);
+    expect(resolveVaultRelativeDir(vault, 'Skills/..')).toBe(vault);
+  });
+
+  it('rejects empty and whitespace-only input', () => {
+    expect(resolveVaultRelativeDir(vault, '')).toBeNull();
+    expect(resolveVaultRelativeDir(vault, '   ')).toBeNull();
+  });
+
+  it('rejects absolute paths (even ones inside the vault)', () => {
+    expect(resolveVaultRelativeDir(vault, '/etc')).toBeNull();
+    expect(resolveVaultRelativeDir(vault, path.join(vault, 'Skills'))).toBeNull();
+  });
+
+  it('rejects "../" escapes out of the vault', () => {
+    expect(resolveVaultRelativeDir(vault, '..')).toBeNull();
+    expect(resolveVaultRelativeDir(vault, '../secret')).toBeNull();
+    expect(resolveVaultRelativeDir(vault, 'Skills/../../secret')).toBeNull();
+    expect(resolveVaultRelativeDir(vault, 'a/../../..')).toBeNull();
+  });
+
+  it.skipIf(process.platform !== 'win32')('rejects Windows drive-absolute input', () => {
+    expect(resolveVaultRelativeDir('C:\\Users\\me\\Vault', 'D:\\evil')).toBeNull();
+  });
+});
+describe('frontmatterAliases (P2-H)', () => {
+  it('maps string arrays to trimmed string lists', () => {
+    expect(frontmatterAliases(['One', 'Two', 3])).toEqual(['One', 'Two', '3']);
+  });
+
+  it('splits a comma-separated string and drops empty entries', () => {
+    expect(frontmatterAliases(' One,  Two , ,Three ')).toEqual(['One', 'Two', 'Three']);
+    expect(frontmatterAliases('')).toEqual([]);
+  });
+
+  it('returns [] for non-array / non-string garbage', () => {
+    for (const raw of [undefined, null, 42, { a: 1 }]) {
+      expect(frontmatterAliases(raw)).toEqual([]);
+    }
+  });
+});
+
+describe('partialTurnAnswer (P2-K)', () => {
+  const marker = '(interrupted — partial work saved)';
+
+  it('keeps the partial final answer when stdout has real content', () => {
+    expect(partialTurnAnswer('DLEVENT\t{\"t\":\"think\"}\npartial answer', '', false, marker))
+      .toBe('partial answer');
+  });
+
+  it('uses the marker when only thinking arrived before the kill', () => {
+    expect(partialTurnAnswer('', 'some reasoning', false, marker)).toBe(marker);
+  });
+
+  it('uses the marker when only tool activity arrived before the kill', () => {
+    expect(partialTurnAnswer('', '', true, marker)).toBe(marker);
+  });
+
+  it('returns null when the run produced nothing worth keeping', () => {
+    expect(partialTurnAnswer('', '', false, marker)).toBeNull();
+    expect(partialTurnAnswer('DLEVENT\t{\"t\":\"think\"}\n', '', false, marker)).toBeNull();
+    expect(partialTurnAnswer('   \n  ', '   ', false, marker)).toBeNull();
   });
 });

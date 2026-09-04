@@ -1,4 +1,4 @@
-import { Modal, App, Setting, Notice } from 'obsidian';
+import { Modal, App, Setting, Notice, FuzzySuggestModal, TFolder } from 'obsidian';
 import { t } from './i18n';
 
 /** Simplified "save as note" modal (pattern borrowed from claudian). */
@@ -72,5 +72,37 @@ export class SecurityConfirmModal extends Modal {
 
   onClose(): void {
     this.contentEl.empty();
+  }
+}
+
+/**
+ * Pick a vault folder for `extraSkillDirs` without typing a path.
+ *
+ * Listing only real folders inside the vault makes the choice self-evident
+ * for novices AND makes escapes (absolute paths / `../`) structurally
+ * impossible — the vault-relative check stays as a safety net for hand-typed
+ * values. Top-level folders are listed first, then nested ones.
+ */
+export class FolderSuggestModal extends FuzzySuggestModal<string> {
+  constructor(app: App, private onPick: (folder: string) => void) {
+    super(app);
+    this.setPlaceholder(t('settings.extraSkillDirs.pickPlaceholder'));
+  }
+
+  getItems(): string[] {
+    const depth = (p: string): number => p.split('/').length;
+    return this.app.vault.getAllLoadedFiles()
+      .filter((f): f is TFolder => f instanceof TFolder)
+      .map((f) => f.path)
+      .filter((p) => p !== '' && p !== '/') // skip the vault root itself
+      .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b));
+  }
+
+  getItemText(item: string): string {
+    return item;
+  }
+
+  onChooseItem(item: string): void {
+    this.onPick(item);
   }
 }

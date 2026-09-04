@@ -1,5 +1,18 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn as nodeSpawn, ChildProcess } from 'child_process';
 import * as path from 'path';
+
+/** The child-process spawn function used by DshClient. */
+export type SpawnFn = typeof nodeSpawn;
+
+/** Optional dependencies that make DshClient testable in Node without a window shim. */
+export interface DshClientDeps {
+  /** Replace the real child_process.spawn (used for fake-spawn tests). */
+  spawn?: SpawnFn;
+  /** Replace window/global timers. Defaults to globalThis.setTimeout. */
+  setTimeout?: (handler: () => void, timeout?: number) => unknown;
+  /** Clear a timer returned by the injected setTimeout. */
+  clearTimeout?: (handle: unknown) => void;
+}
 
 /**
  * Thin bridge between the plugin and the DeepSeek Harness CLI.
@@ -36,6 +49,10 @@ export interface DshRunOptions {
   toolsMode?: string;
   /** DSH sandbox mode: read-only | workspace-write | danger-full-access. */
   permissionMode?: string;
+  /** Additional environment entries the plugin wants the child to see.
+   *  Merged over the inherited allowlist and under the plugin-owned DSH_*
+   *  overrides below. Use this (not the allowlist) for one-off/feature vars. */
+  env?: Record<string, string>;
   /** Path(s) to generated `--patch` overlays (repeatable). */
   patchPath?: string | string[];
   /** Kill the process after this many ms. 0 = no timeout. */
@@ -51,8 +68,12 @@ export interface DshRunResult {
   stdout: string;
   stderr: string;
   durationMs: number;
-  /** True when terminated by user/timeout rather than by dsh itself. */
+  /** True when terminated by user/timeout rather than by dsh itself
+   *  (kept for callers of the old shape; equals `killReason !== null`). */
   killed: boolean;
+  /** Why the run was terminated early, so the UI can tell a timeout
+   *  apart from a user-initiated stop. null = dsh exited on its own. */
+  killReason: 'timeout' | 'user' | null;
 }
 
 export interface DshDiagnostics {
@@ -65,12 +86,107 @@ export interface DshDiagnostics {
   nodeBin: string | null;
 }
 
+/**
+ * Environment keys the dsh child process may inherit from the plugin's
+ * process. Everything else is dropped: Obsidian's Electron process can carry
+ * secrets (API tokens, per-app config) and unrelated tool state that the
+ * agent has no business seeing.
+ *
+ * Extend this list deliberately. For one-off / feature-specific variables use
+ * DshRunOptions.env (an explicit plugin opt-in) instead of widening the
+ * inheritance here.
+ */
+export const DSH_ENV_ALLOWLIST: ReadonlySet<string> = new Set([
+  // Core process / shell
+  'PATH', 'HOME', 'USER', 'LOGNAME', 'SHELL', 'TERM',
+  // Locale
+  'LANG', 'LANGUAGE', 'LC_ALL', 'LC_CTYPE', 'LC_MESSAGES',
+  // Temp dirs
+  'TMPDIR', 'TMP', 'TEMP',
+  // git-over-SSH: the agent runs git on the vault and may need the user's
+  // ssh-agent socket for private remotes.
+  'SSH_AUTH_SOCK', 'SSH_AGENT_PID',
+  // Proxy settings (dsh may bootstrap sandbox deps and call the API).
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY',
+  'http_proxy', 'https_proxy', 'no_proxy', 'all_proxy',
+  // npm registry mirror for the sandbox bootstrap.
+  'NPM_CONFIG_REGISTRY', 'npm_config_registry',
+  // Windows system dirs (case-preserving, as inherited).
+  'SystemRoot', 'SystemDrive', 'windir', 'COMSPEC', 'PATHEXT',
+  'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'APPDATA', 'LOCALAPPDATA',
+  'ProgramData', 'ProgramFiles', 'ProgramFiles(x86)', 'ALLUSERSPROFILE',
+  'NUMBER_OF_PROCESSORS', 'OS', 'PROCESSOR_ARCHITECTURE',
+]);
+
+/**
+ * Build the child environment for a dsh run without leaking the plugin's whole
+ * process.env.
+ *
+ * Layering, lowest to highest precedence:
+ * 1. Inherited keys: only those on DSH_ENV_ALLOWLIST are copied over.
+ * 2. opts.env entries: explicit plugin opt-ins for one-off vars.
+ * 3. Plugin-owned overrides: DSH_HOME, the API key (under the env var the
+ *    selected provider reads), DSH_TOOLS_MODE, DSH_PERMISSION_MODE.
+ * 4. PATH: when spawning via node <bin.js>, node's directory is prepended so
+ *    the agent's own bash tool can still find node/npm.
+ */
+export function buildDshEnv(
+  opts: DshRunOptions,
+  sourceEnv: Readonly<Record<string, string | undefined>>,
+): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const key of DSH_ENV_ALLOWLIST) {
+    const value = sourceEnv[key];
+    if (value !== undefined) env[key] = value;
+  }
+  if (opts.env) {
+    for (const [key, value] of Object.entries(opts.env)) {
+      if (value !== undefined) env[key] = value;
+    }
+  }
+  if (opts.dshHome) env.DSH_HOME = opts.dshHome;
+  // Plugin-only API key: the environment layer wins over the credentials file
+  // in DSH's precedence, so this key takes effect even when the plugin DSH_HOME
+  // symlinks ~/.dsh/.credentials.yaml. Inject it under the env var the selected
+  // provider actually reads.
+  if (opts.apiKey) {
+    const envVar = opts.provider === 'opencode-go'
+      ? 'OPENCODE_GO_API_KEY'
+      : 'DEEPSEEK_API_KEY';
+    env[envVar] = opts.apiKey;
+  }
+  // DSH_TOOLS_MODE selects the tool execution backend (native/code/both); only
+  // set it when the user explicitly chose one. It is NOT a file sandbox knob:
+  // file tools scope to the session cwd (= the vault).
+  if (opts.toolsMode) env.DSH_TOOLS_MODE = opts.toolsMode;
+  // DSH_PERMISSION_MODE selects the sandbox mode (read-only / workspace-write
+  // / danger-full-access), consumed by dsh-sandbox-policy and
+  // dsh-permission-presets in the base bundle.
+  if (opts.permissionMode) env.DSH_PERMISSION_MODE = opts.permissionMode;
+  // Use platform dirname + delimiter: on Windows a 'C:\...\node.exe' path
+  // has no '/', and PATH entries are separated by ';' not ':'.
+  if (opts.nodeBin) {
+    const nodeDir = path.dirname(opts.nodeBin);
+    const fallback = process.platform === 'win32'
+      ? 'C:\\Windows\\System32;C:\\Windows'
+      : '/usr/bin:/bin';
+    env.PATH = [nodeDir, env.PATH || fallback].join(path.delimiter);
+  }
+  return env;
+}
+
 export class DshClient {
   /** Every live client, so the plugin can kill all children on unload. */
   private static live = new Set<DshClient>();
   private child: ChildProcess | null = null;
+  private readonly deps: DshClientDeps;
+  private readonly setTimeoutFn: NonNullable<DshClientDeps['setTimeout']>;
+  private readonly clearTimeoutFn: NonNullable<DshClientDeps['clearTimeout']>;
 
-  constructor() {
+  constructor(deps: DshClientDeps = {}) {
+    this.deps = deps;
+    this.setTimeoutFn = deps.setTimeout ?? ((handler: () => void, timeout?: number): unknown => window.setTimeout(handler, timeout));
+    this.clearTimeoutFn = deps.clearTimeout ?? ((handle: unknown): void => window.clearTimeout(handle as number));
     DshClient.live.add(this);
   }
 
@@ -95,40 +211,12 @@ export class DshClient {
       const spawnBin = useNodeDirect ? opts.nodeBin! : opts.dshBin;
       const spawnArgs = useNodeDirect ? [opts.dshScript!, ...args] : args;
 
-      const env: Record<string, string> = { ...process.env as Record<string, string> };
-      if (opts.dshHome) env.DSH_HOME = opts.dshHome;
-      // Plugin-only API key: the environment layer wins over the credentials
-      // file in DSH's precedence, so this key takes effect even when the
-      // plugin DSH_HOME symlinks ~/.dsh/.credentials.yaml. Inject it under the
-      // env var the selected provider actually reads.
-      if (opts.apiKey) {
-        const envVar = opts.provider === 'opencode-go'
-          ? 'OPENCODE_GO_API_KEY'
-          : 'DEEPSEEK_API_KEY';
-        env[envVar] = opts.apiKey;
-      }
-      // DSH_TOOLS_MODE selects the tool execution backend (native/code/both);
-      // only set it when the user explicitly chose one. It is NOT a file
-      // sandbox knob — file tools scope to the session cwd (= the vault).
-      if (opts.toolsMode) env.DSH_TOOLS_MODE = opts.toolsMode;
-      // DSH_PERMISSION_MODE selects the sandbox mode (read-only /
-      // workspace-write / danger-full-access), consumed by dsh-sandbox-policy
-      // and dsh-permission-presets in the base bundle.
-      if (opts.permissionMode) env.DSH_PERMISSION_MODE = opts.permissionMode;
-      // Make sure the agent's own bash tool can still find node/npm.
-      // Use platform dirname + delimiter: on Windows a `C:\...\node.exe` path
-      // has no '/', and PATH entries are separated by ';' not ':'.
-      if (opts.nodeBin) {
-        const nodeDir = path.dirname(opts.nodeBin);
-        const fallback = process.platform === 'win32'
-          ? 'C:\\Windows\\System32;C:\\Windows'
-          : '/usr/bin:/bin';
-        env.PATH = [nodeDir, env.PATH || fallback].join(path.delimiter);
-      }
+      const env = buildDshEnv(opts, process.env);
+      const spawnFn = this.deps.spawn ?? nodeSpawn;
       const startedAt = Date.now();
       let stdout = '';
       let stderr = '';
-      let killed = false;
+      let killReason: DshRunResult['killReason'] = null;
       let settled = false;
 
       const finish = (exitCode: number | null): void => {
@@ -140,11 +228,12 @@ export class DshClient {
           stdout,
           stderr,
           durationMs: Date.now() - startedAt,
-          killed,
+          killed: killReason !== null,
+          killReason,
         });
       };
 
-      const child = spawn(spawnBin, spawnArgs, {
+      const child = spawnFn(spawnBin, spawnArgs, {
         cwd: opts.cwd,
         env,
         shell: false,
@@ -154,6 +243,14 @@ export class DshClient {
         detached: true,
       });
       this.child = child;
+
+      // The first termination request wins: a timeout and a user stop racing
+      // each other must not overwrite the reason that was reported first.
+      const requestKill = (reason: 'timeout' | 'user'): void => {
+        if (killReason !== null) return;
+        killReason = reason;
+        this.killChild(child);
+      };
 
       let stdoutBuffer = '';
 
@@ -190,23 +287,16 @@ export class DshClient {
 
       // Timeout
       if (opts.timeoutMs && opts.timeoutMs > 0) {
-        const timer = window.setTimeout(() => {
-          killed = true;
-          this.killChild(child);
-        }, opts.timeoutMs);
-        child.on('close', () => window.clearTimeout(timer));
+        const timer = this.setTimeoutFn(() => requestKill('timeout'), opts.timeoutMs);
+        child.on('close', () => this.clearTimeoutFn(timer));
       }
 
       // User cancellation
       if (opts.signal) {
         if (opts.signal.aborted) {
-          killed = true;
-          this.killChild(child);
+          requestKill('user');
         } else {
-          opts.signal.addEventListener('abort', () => {
-            killed = true;
-            this.killChild(child);
-          }, { once: true });
+          opts.signal.addEventListener('abort', () => requestKill('user'), { once: true });
         }
       }
     });
@@ -247,12 +337,15 @@ export class DshClient {
     };
     try {
       kill('SIGTERM');
-      // Escalate after a grace period.
-      window.setTimeout(() => {
+      // Escalate after a grace period, unless the child already exited.
+      // Cleared on close so no stray timer keeps the process alive.
+      const escalate = (): void => {
         if (child.exitCode === null && child.signalCode === null) {
           kill('SIGKILL');
         }
-      }, 3000);
+      };
+      const timer = this.setTimeoutFn(escalate, 3000);
+      child.once('close', () => this.clearTimeoutFn(timer));
     } catch {
       // Already gone
     }
