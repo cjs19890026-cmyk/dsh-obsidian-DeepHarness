@@ -3,12 +3,12 @@ import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, setIcon, Menu, Markd
 import type DshPlugin from './main';
 import { DshClient } from './dsh-client';
 import { DshRunner } from './dsh-runner';
-import { buildTitleEntries, linkifyNoteTitles, type NoteInfo } from './linkify';
+import { buildTitleEntries, linkifyNoteTitles, type NoteInfo, type NoteTitleEntry } from './linkify';
 import { scanSkillRoots, type SkillEntry, type ScanRoot } from './skills';
 import { SkillSuggest } from './skill-suggest';
 import { MODEL_OPTIONS, REASONING_OPTIONS, PERMISSION_OPTIONS, permissionLabel, type PermissionMode } from './settings';
 import { ContextMeter, estimateTokens } from './context-meter';
-import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir } from './pure';
+import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir, frontmatterAliases } from './pure';
 import { HistoryTool } from './history';
 import { MentionSuggest } from './mention';
 import { ChipEditor } from './chip-editor';
@@ -61,6 +61,8 @@ export class ChatView extends ItemView {
   private contextMeter: ContextMeter | null = null;
   private settingsUnsub: (() => void) | null = null;
   private localeUnsub: (() => void) | null = null;
+  /** P2-H: cached wikilink title index; invalidated when the vault changes. */
+  private linkifyEntries: NoteTitleEntry[] | null = null;
 
   constructor(leaf: WorkspaceLeaf, plugin: DshPlugin) {
     super(leaf);
@@ -98,6 +100,15 @@ export class ChatView extends ItemView {
         }
       }),
     );
+
+    // P2-H: keep the linkify title cache in sync with the vault. Marking it
+    // dirty on any vault change is cheaper than scanning the whole vault for
+    // every rendered answer; the scan happens again on the next answer.
+    const invalidateLinkifyCache = (): void => { this.linkifyEntries = null; };
+    this.registerEvent(this.app.vault.on('create', invalidateLinkifyCache));
+    this.registerEvent(this.app.vault.on('delete', invalidateLinkifyCache));
+    this.registerEvent(this.app.vault.on('rename', invalidateLinkifyCache));
+    this.registerEvent(this.app.vault.on('modify', invalidateLinkifyCache));
 
     // Header
     const header = container.createDiv({ cls: 'dsh-header' });
@@ -688,18 +699,21 @@ export class ChatView extends ItemView {
    * (copy / save-as-note keep the original answer).
    */
   private linkifyAnswer(text: string): string {
-    const files = this.app.vault.getMarkdownFiles();
-    const notes: NoteInfo[] = files.map((f) => {
+    if (!this.linkifyEntries) {
+      this.linkifyEntries = buildTitleEntries(this.collectNoteInfos());
+    }
+    return linkifyNoteTitles(text, this.linkifyEntries);
+  }
+
+  /** Collect one NoteInfo per markdown file (title, path, aliases). */
+  private collectNoteInfos(): NoteInfo[] {
+    return this.app.vault.getMarkdownFiles().map((f) => {
       let aliases: string[] = [];
       try {
         const fm = this.app.metadataCache.getFileCache(f)?.frontmatter as
           | { aliases?: unknown }
           | undefined;
-        const raw = fm?.aliases;
-        if (Array.isArray(raw)) aliases = raw.map(String);
-        else if (typeof raw === 'string') {
-          aliases = raw.split(',').map((s) => s.trim()).filter(Boolean);
-        }
+        aliases = frontmatterAliases(fm?.aliases);
       } catch {
         // metadata read failure: link by title only
       }
@@ -709,7 +723,6 @@ export class ChatView extends ItemView {
         aliases,
       };
     });
-    return linkifyNoteTitles(text, buildTitleEntries(notes));
   }
 
   /** Collapsible "思考过程" block (default collapsed, plain text). */

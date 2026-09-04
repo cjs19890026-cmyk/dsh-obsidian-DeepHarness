@@ -196,3 +196,18 @@ export function resolveVaultRelativeDir(vaultRoot: string, rel: string): string 
   }
   return base;
 }
+
+/**
+ * Normalize the Obsidian `aliases` frontmatter value (array, comma-separated
+ * string, or garbage) into a clean string list.
+ *
+ * Extracted from ChatView.linkifyAnswer (P2-H) so the fiddly parsing can be
+ * unit-tested Obsidian-free; used to build the vault-note title index.
+ */
+export function frontmatterAliases(raw: unknown): string[] {
+  if (Array.isArray(raw)) return raw.map(String);
+  if (typeof raw === 'string') {
+    return raw.split(',').map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+}

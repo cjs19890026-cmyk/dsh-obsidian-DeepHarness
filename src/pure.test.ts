@@ -11,6 +11,7 @@ import {
   streamRelayPatchYaml,
   shimJsTarget,
   resolveVaultRelativeDir,
+  frontmatterAliases,
 } from './pure';
 import { estimateTokens } from './context-meter';
 
@@ -270,5 +271,21 @@ describe('resolveVaultRelativeDir (extraSkillDirs boundary)', () => {
 
   it.skipIf(process.platform !== 'win32')('rejects Windows drive-absolute input', () => {
     expect(resolveVaultRelativeDir('C:\\Users\\me\\Vault', 'D:\\evil')).toBeNull();
+  });
+});
+describe('frontmatterAliases (P2-H)', () => {
+  it('maps string arrays to trimmed string lists', () => {
+    expect(frontmatterAliases(['One', 'Two', 3])).toEqual(['One', 'Two', '3']);
+  });
+
+  it('splits a comma-separated string and drops empty entries', () => {
+    expect(frontmatterAliases(' One,  Two , ,Three ')).toEqual(['One', 'Two', 'Three']);
+    expect(frontmatterAliases('')).toEqual([]);
+  });
+
+  it('returns [] for non-array / non-string garbage', () => {
+    for (const raw of [undefined, null, 42, { a: 1 }]) {
+      expect(frontmatterAliases(raw)).toEqual([]);
+    }
   });
 });
