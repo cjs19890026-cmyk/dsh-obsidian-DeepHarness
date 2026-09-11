@@ -114,6 +114,9 @@ const translations = {
     'settings.toolMode.desc': 'native (default) = native function calls; code = run via run_code; both = both. Empty uses the DSH default.',
     'settings.model.name': 'Model',
     'settings.model.desc': 'Default model; can also be switched from the chat panel header.',
+    // Rolling alias option: DeepSeek repoints the id to its newest model, so the
+    // user never has to change this setting again.
+    'settings.model.latest': 'Latest model (auto-tracking)',
     'settings.reasoning.name': 'Reasoning effort (Thinking)',
     'settings.reasoning.desc': 'off / high / max; can also be switched from the chat panel header.',
     'settings.permission.name': 'Security mode',
@@ -266,6 +269,7 @@ const translations = {
     'settings.toolMode.desc': 'native(默认)= 原生函数调用;code = 通过 run_code 执行;both = 两者。留空使用 DSH 默认。',
     'settings.model.name': '模型 (Model)',
     'settings.model.desc': '默认模型,可在聊天面板顶部快速切换。',
+    'settings.model.latest': '最新模型(自动跟随)',
     'settings.reasoning.name': '推理等级 (Thinking)',
     'settings.reasoning.desc': 'off / high / max,可在聊天面板顶部快速切换。',
     'settings.permission.name': '安全模式 (Security)',

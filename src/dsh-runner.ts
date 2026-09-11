@@ -100,6 +100,11 @@ const PERSONA_VERSION = 5;
  *
  * Model ids here MUST stay in sync with `MODEL_OPTIONS` in settings.ts — the
  * consistency is guarded by provider-fallback.test.ts.
+ *
+ * Note: `deepseek-flash` is DeepSeek's rolling alias and is listed first, so it
+ * matches the order and default in settings.ts. The `contextWindow` values here
+ * (131072) are the fallback provider's own figures and are intentionally not
+ * tied to MODEL_CONTEXT_WINDOWS in pure.ts.
  */
 export const OPENCODE_GO_PROVIDER_FALLBACK = [
   'llm-pi-ai:',
@@ -114,6 +119,9 @@ export const OPENCODE_GO_PROVIDER_FALLBACK = [
   '        supportsDeveloperRole: false',
   '        maxTokensField: max_tokens',
   '      models:',
+  '        - id: deepseek-flash',
+  '          name: DeepSeek V4.1 Flash',
+  '          contextWindow: 131072',
   '        - id: deepseek-v4-flash',
   '          name: DeepSeek V4 Flash',
   '          contextWindow: 131072',

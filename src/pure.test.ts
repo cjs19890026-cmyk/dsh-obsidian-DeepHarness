@@ -138,6 +138,7 @@ describe('versionCmp', () => {
 
 describe('contextWindowFor', () => {
   it('resolves known models', () => {
+    expect(contextWindowFor('deepseek-flash')).toBe(1_000_000);
     expect(contextWindowFor('deepseek-v4-flash')).toBe(1_000_000);
     expect(contextWindowFor('deepseek-v4-pro')).toBe(1_000_000);
   });

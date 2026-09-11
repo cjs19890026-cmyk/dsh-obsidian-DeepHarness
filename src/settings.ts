@@ -75,7 +75,7 @@ export const DEFAULT_SETTINGS: DshSettings = {
   language: 'auto',
   customPersona: '',
   toolExecutionMode: '',
-  model: 'deepseek-v4-flash',
+  model: 'deepseek-flash',
   reasoningEffort: 'high',
   permissionMode: 'workspace-write',
   showThinking: true,
@@ -94,7 +94,24 @@ export const PROVIDER_OPTIONS = [
   { id: 'opencode-go', label: 'OpenCode Go' },
 ] as const;
 
+/**
+ * Selectable model ids, in dropdown order.
+ *
+ * `deepseek-flash` is DeepSeek's *rolling alias*: the API repoints that id to
+ * the newest model (V4.1 Flash as of 2026-09-10), so it is listed first and is
+ * the default — a new install rides the frontier without the user ever
+ * revisiting this setting. The versioned ids below are pinned snapshots:
+ * DeepSeek keeps routing them for compatibility, but they can be retired
+ * (the former `deepseek-chat` / `deepseek-reasoner` aliases were dropped on
+ * 2026-07-24).
+ *
+ * `labelKey` marks entries whose label is UI copy rather than a brand name;
+ * brand names stay untranslated in both locales (see `modelLabel`). Adding an
+ * id here also requires an entry in `MODEL_CONTEXT_WINDOWS` (pure.ts) and in
+ * `OPENCODE_GO_PROVIDER_FALLBACK` (dsh-runner.ts) — guarded by tests.
+ */
 export const MODEL_OPTIONS = [
+  { id: 'deepseek-flash', label: 'Latest model (auto-tracking)', labelKey: 'settings.model.latest' },
   { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
   { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
   { id: 'deepseek-v4-flash-vision-exp', label: 'DeepSeek V4 Flash Vision (Exp)' },
@@ -120,6 +137,19 @@ export type ProviderId = typeof PROVIDER_OPTIONS[number]['id'];
 export type ModelId = typeof MODEL_OPTIONS[number]['id'];
 export type ReasoningEffort = typeof REASONING_OPTIONS[number]['id'];
 export type PermissionMode = typeof PERMISSION_OPTIONS[number]['id'];
+
+/**
+ * Display label for a model id (settings dropdown + chat toolbar/menu).
+ *
+ * Brand names (`DeepSeek V4 Pro`) are never localized; only entries carrying a
+ * `labelKey` — currently the rolling "latest" alias — resolve through i18n, so
+ * that descriptor follows the UI language like every other string.
+ */
+export function modelLabel(id: ModelId): string {
+  const o = MODEL_OPTIONS.find((x) => x.id === id);
+  if (!o) return id;
+  return 'labelKey' in o ? t(o.labelKey) : o.label;
+}
 
 /** Tool execution modes ('' = DSH default). Kept as an option list so the type
  *  and the settings dropdown cannot drift apart. */
@@ -336,7 +366,7 @@ export class DshSettingTab extends PluginSettingTab {
 
           render(t('settings.model.name'), t('settings.model.desc'), (setting) => {
             setting.addDropdown((dd) => {
-              for (const m of MODEL_OPTIONS) dd.addOption(m.id, m.label);
+              for (const m of MODEL_OPTIONS) dd.addOption(m.id, modelLabel(m.id));
               dd.setValue(s.model).onChange(async (value) => {
                 s.model = value as ModelId;
                 await this.plugin.saveSettings();

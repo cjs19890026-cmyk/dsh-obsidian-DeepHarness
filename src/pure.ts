@@ -161,6 +161,8 @@ export const DEFAULT_CONTEXT_WINDOW = 1_000_000;
 
 /** Context window (tokens) per model id. */
 export const MODEL_CONTEXT_WINDOWS: Record<string, number> = {
+  // Rolling alias — DeepSeek repoints it to the newest model.
+  'deepseek-flash': 1_000_000,
   'deepseek-v4-flash': 1_000_000,
   'deepseek-v4-pro': 1_000_000,
   'deepseek-v4-flash-vision-exp': 1_000_000,

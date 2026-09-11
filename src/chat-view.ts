@@ -6,7 +6,7 @@ import { DshRunner, type PreparationIssue } from './dsh-runner';
 import { buildTitleEntries, linkifyNoteTitles, type NoteInfo, type NoteTitleEntry } from './linkify';
 import { scanSkillRoots, type SkillEntry, type ScanRoot } from './skills';
 import { SkillSuggest } from './skill-suggest';
-import { MODEL_OPTIONS, REASONING_OPTIONS, PERMISSION_OPTIONS, permissionLabel, type PermissionMode } from './settings';
+import { MODEL_OPTIONS, REASONING_OPTIONS, PERMISSION_OPTIONS, modelLabel, permissionLabel, type PermissionMode } from './settings';
 import { ContextMeter, estimateTokens } from './context-meter';
 import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir, frontmatterAliases, partialTurnAnswer } from './pure';
 import { HistoryTool } from './history';
@@ -264,11 +264,10 @@ export class ChatView extends ItemView {
   /** Refresh trigger button labels from settings. */
   private updateTriggerLabels(): void {
     if (!this.modelTrigger || !this.securityTrigger) return;
-    const m = MODEL_OPTIONS.find((x) => x.id === this.plugin.settings.model);
     const r = REASONING_OPTIONS.find((x) => x.id === this.plugin.settings.reasoningEffort);
     const nameEl = this.modelTrigger.querySelector('.dsh-trigger-model-name') as HTMLElement;
     const effortEl = this.modelTrigger.querySelector('.dsh-trigger-effort') as HTMLElement;
-    if (nameEl) nameEl.textContent = m ? m.label : this.plugin.settings.model;
+    if (nameEl) nameEl.textContent = modelLabel(this.plugin.settings.model);
     if (effortEl) effortEl.textContent = `· ${r ? r.label : this.plugin.settings.reasoningEffort}`;
     const secLabel = this.securityTrigger.querySelector('.dsh-trigger-security-label') as HTMLElement;
     const p = PERMISSION_OPTIONS.find((x) => x.id === this.plugin.settings.permissionMode);
@@ -286,7 +285,7 @@ export class ChatView extends ItemView {
     const menu = new Menu();
     for (const m of MODEL_OPTIONS) {
       menu.addItem((item) => item
-        .setTitle(m.label)
+        .setTitle(modelLabel(m.id))
         .setChecked(m.id === this.plugin.settings.model)
         .onClick(() => {
           this.plugin.settings.model = m.id;

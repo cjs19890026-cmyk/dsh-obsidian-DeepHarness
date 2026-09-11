@@ -65,7 +65,7 @@ After enabling the plugin, click the bot icon in the left ribbon to open the cha
 ## Features
 
 - 💬 **Chat panel**: send a task → status indicator (starting / thinking / elapsed) → Markdown-rendered result
-- 🧠 **Model selector**: switch between **DeepSeek V4 Flash / DeepSeek V4 Pro** in the panel toolbar
+- 🧠 **Model selector**: defaults to **Latest model (auto-tracking)** — DeepSeek's rolling alias (`deepseek-flash`), which the API repoints to the newest model, so a new version never requires changing this setting. Pinned snapshots (V4 Flash / V4 Pro / V4 Flash Vision Exp) are switchable from the panel toolbar
 - ⚙️ **Reasoning effort (Thinking)**: switch **off / high / max** in the toolbar
   - Written to the plugin-owned DSH_HOME (`dsh-home/` directory) via the `agent-default-model` config; credentials are symlinked from `~/.dsh` — the global DSH settings are **never polluted**
 - ⏹ **Stop button** (SIGTERM) and a timeout fallback (default 10 minutes)
@@ -92,7 +92,7 @@ After enabling the plugin, click the bot icon in the left ribbon to open the cha
 | Task timeout | 600s | Auto-stops the run when exceeded |
 | Conversation memory | on | Context refill |
 | Tool execution mode | default (native) | native / code / both (tool backend, not a file sandbox) |
-| Model | DeepSeek V4 Flash | Default model; switchable from the panel toolbar |
+| Model | Latest model (auto-tracking) | Rolling DeepSeek alias (`deepseek-flash`) that always resolves to the newest model; pinned snapshots are switchable from the panel toolbar |
 | Reasoning effort | high | off / high / max; switchable from the toolbar |
 | Security mode | workspace write | read-only / workspace write / full access |
 | Show thinking | on | Collapsible thinking block before the answer |
