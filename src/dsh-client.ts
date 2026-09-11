@@ -305,10 +305,6 @@ export class DshClient {
     }
   }
 
-  isRunning(): boolean {
-    return this.child !== null;
-  }
-
   /** Kill any live children and drop this client from the registry. */
   dispose(): void {
     this.stop();
