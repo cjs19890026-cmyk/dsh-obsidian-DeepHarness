@@ -292,9 +292,3 @@ export function readDshSettings(dshHome: string): DshConfigSnapshot | null {
     return null;
   }
 }
-
-/** True when a snapshot carries nothing worth merging. */
-export function isEmptySnapshot(s: DshConfigSnapshot | null): boolean {
-  if (!s) return true;
-  return s.models.length === 0 && s.providers.length === 0;
-}

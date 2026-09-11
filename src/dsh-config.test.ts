@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   extractTopLevelBlock,
-  isEmptySnapshot,
   isSafeModelId,
   isSafeProviderId,
   parseDshSettings,
@@ -222,12 +221,9 @@ describe('parseDshSettings', () => {
   });
 
   it('reports an empty snapshot for an unrelated document', () => {
-    expect(isEmptySnapshot(parseDshSettings('other:\n  key: value\n'))).toBe(true);
-    expect(isEmptySnapshot(null)).toBe(true);
-  });
-
-  it('reports a non-empty snapshot when models were found', () => {
-    expect(isEmptySnapshot(parseDshSettings(REAL_SETTINGS))).toBe(false);
+    const snap = parseDshSettings('other:\n  key: value\n');
+    expect(snap.models).toEqual([]);
+    expect(snap.providers).toEqual([]);
   });
 });
 
