@@ -1,10 +1,15 @@
+import * as fs from 'fs';
+import * as path from 'path';
+
 /**
  * Environment-check reporting and the copy-paste repair request.
  *
- * Kept Obsidian-free so both halves can be unit-tested in Node: the settings
- * page does the I/O and the rendering, this module decides what a failure
- * *means* and what text a user can hand to someone (or something) that can fix
- * it.
+ * Kept Obsidian-free so all of it can be unit-tested in Node. The settings
+ * page renders the report; this module decides what a failure *means*, what
+ * text a user can hand to someone (or something) that can fix it, and — see
+ * `checkWritableDir` / `checkWritableFile` at the bottom — performs the write
+ * probes. Those two used to live in settings.ts, where being tangled up with
+ * the settings UI meant they had no tests at all.
  *
  * SECURITY: `DiagnosticContext` deliberately has no API-key field, and
  * `buildRepairPrompt` can only serialise what is in that type. The prompt is
@@ -191,4 +196,30 @@ export function buildCheckOutcomes(
       ...(w.error === null ? {} : { error: w.error }),
     })),
   ];
+}
+
+/** Return an error message when a directory cannot be created/written. */
+export function checkWritableDir(dir: string): string | null {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, `.deepharness-write-test-${Date.now()}`);
+    fs.writeFileSync(probe, 'ok', 'utf8');
+    fs.rmSync(probe, { force: true });
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
+}
+
+/** Return an error message when an existing file cannot be opened for writing.
+ *  A missing settings.yaml is allowed if its parent directory is writable. */
+export function checkWritableFile(file: string): string | null {
+  try {
+    if (!fs.existsSync(file)) return checkWritableDir(path.dirname(file));
+    const fd = fs.openSync(file, 'r+');
+    fs.closeSync(fd);
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e);
+  }
 }

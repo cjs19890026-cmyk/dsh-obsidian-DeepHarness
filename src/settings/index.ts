@@ -1,385 +1,56 @@
 import { App, Notice, Platform, PluginSettingTab, Setting, requestUrl, type DropdownComponent, type SettingDefinitionItem, type SettingDefinitionRender, type TextComponent } from 'obsidian';
-import * as fs from 'fs';
-import * as path from 'path';
-import type DshPlugin from './main';
-import { t, Locale, type TranslationKey } from './i18n';
-import { DshRunner } from './dsh-runner';
-import { pluginPaths } from './paths';
-import { DiagnosticPromptModal, FolderSuggestModal } from './modals';
-import { isSafeModelId, isSafeProviderId } from './dsh-config';
-import { comparePluginVersion, fetchLatestRelease, type PluginUpdateStatus } from './updates';
+import type DshPlugin from '../main';
+import { t, type TranslationKey } from '../i18n';
+import { DshRunner } from '../dsh-runner';
+import { pluginPaths } from '../paths';
+import { DiagnosticPromptModal, FolderSuggestModal } from '../modals';
+import { comparePluginVersion, fetchLatestRelease, type PluginUpdateStatus } from '../updates';
 import {
   buildCheckOutcomes,
   buildRepairPrompt,
   CHECK_HINT_KEYS,
   CHECK_LABEL_KEYS,
+  checkWritableDir,
+  checkWritableFile,
   hasFailures,
   type CheckOutcome,
   type WriteProbe,
-} from './diagnostics';
-
-/** Return an error message when a directory cannot be created/written. */
-function checkWritableDir(dir: string): string | null {
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    const probe = path.join(dir, `.deepharness-write-test-${Date.now()}`);
-    fs.writeFileSync(probe, 'ok', 'utf8');
-    fs.rmSync(probe, { force: true });
-    return null;
-  } catch (e) {
-    return e instanceof Error ? e.message : String(e);
-  }
-}
-
-/** Return an error message when an existing file cannot be opened for writing.
- *  A missing settings.yaml is allowed if its parent directory is writable. */
-function checkWritableFile(file: string): string | null {
-  try {
-    if (!fs.existsSync(file)) return checkWritableDir(path.dirname(file));
-    const fd = fs.openSync(file, 'r+');
-    fs.closeSync(fd);
-    return null;
-  } catch (e) {
-    return e instanceof Error ? e.message : String(e);
-  }
-}
-
-export interface DshSettings {
-  dshBin: string;
-  nodeBin: string;
-  dshHome: string;
-  workdir: string;
-  timeoutSec: number;
-  memoryEnabled: boolean;
-  language: 'auto' | Locale;
-  customPersona: string;
-  /** Tool execution backend: '' (default native) | 'native' | 'code' | 'both'. */
-  toolExecutionMode: ToolExecutionMode;
-  /**
-   * Model id handed to DSH. Free-form by design: it may name a built-in
-   * option, or any id the user added to their model list. Validated by
-   * character set, not by membership of a list, so an id that only exists on
-   * the API (a model DeepSeek shipped after this release) still works.
-   *
-   * This is the *only* place the active model is stored. An earlier design
-   * kept a second `modelCustom` override field, which allowed the dropdown and
-   * the free-text box to hold the same id and contradict each other on screen;
-   * one value with two editors is worse than one editor.
-   */
-  model: string;
-  /**
-   * The model ids offered in the dropdowns, in display order. User-owned and
-   * user-editable: they may add a brand-new id or delete a built-in one.
-   * Always non-empty after `normalizeStoredSettings` — the plugin needs at
-   * least one selectable model to be usable.
-   */
-  models: string[];
-  /** Reasoning effort (one of REASONING_OPTIONS). */
-  reasoningEffort: ReasoningEffort;
-  /** DSH sandbox mode (one of PERMISSION_OPTIONS). */
-  permissionMode: PermissionMode;
-  /** Show the thinking (reasoning) block in the chat. */
-  showThinking: boolean;
-  /** Show tool call blocks in the chat. */
-  showTools: boolean;
-  /** Max history entries kept (10-200). */
-  historyLimit: number;
-  /** Ship the built-in `obsidian` DSH skill into the isolated DSH_HOME. */
-  obsidianSkill: boolean;
-  /** Comma-separated vault-relative extra skill dirs (scanned + passed to DSH). */
-  extraSkillDirs: string;
-  /** Plugin-only DeepSeek API key; empty = reuse the desktop DSH credentials. */
-  apiKey: string;
-  /** Provider route used by the plugin's isolated DSH_HOME. Open, because the
-   *  user may add a custom provider route in DSH's own Models settings. */
-  provider: string;
-}
-
-export const DEFAULT_SETTINGS: DshSettings = {
-  dshBin: '',
-  nodeBin: '',
-  dshHome: '~/.dsh',
-  workdir: '',
-  timeoutSec: 600,
-  memoryEnabled: true,
-  language: 'auto',
-  customPersona: '',
-  toolExecutionMode: '',
-  model: 'deepseek-flash',
-  /**
-   * The user-owned model list shown in the dropdowns, in display order.
-   *
-   * The plugin deliberately does not derive this from anywhere else: an
-   * earlier design read the user's `~/.dsh/settings.yaml` catalog, which made
-   * the list depend on whether (and in which client) the user had ever opened
-   * DSH's own model settings — so the same plugin behaved differently for
-   * different people, invisibly. A list the user owns is predictable, works
-   * identically under desktop / web / TUI-only installs, and lets a brand-new
-   * DeepSeek model be added in one field without waiting for a release.
-   */
-  models: ['deepseek-flash', 'deepseek-v4-flash', 'deepseek-v4-pro', 'deepseek-v4-flash-vision-exp'],
-  reasoningEffort: 'high',
-  permissionMode: 'workspace-write',
-  showThinking: true,
-  showTools: true,
-  historyLimit: 50,
-  obsidianSkill: true,
-  // Optional by design: novices should not inherit the creator's folders.
-  // Examples live in the placeholder/desc; pick via the "Browse…" button.
-  extraSkillDirs: '',
-  apiKey: '',
-  provider: 'deepseek-official',
-};
-
-export const PROVIDER_OPTIONS = [
-  { id: 'deepseek-official', label: 'DeepSeek 官方 API' },
-  { id: 'opencode-go', label: 'OpenCode Go' },
-] as const;
+} from '../diagnostics';
+import {
+  DEFAULT_SETTINGS,
+  MODEL_OPTIONS,
+  PERMISSION_OPTIONS,
+  REASONING_OPTIONS,
+  TOOL_EXECUTION_LABELS,
+  TOOL_EXECUTION_MODES,
+  permissionLabel,
+  type DshSettings,
+  type OptionFieldKey,
+  type PermissionMode,
+  type ReasoningEffort,
+  type ToolExecutionMode,
+} from './types';
+import {
+  buildProviderOptions,
+  mergeModelIds,
+  modelDisplayLabel,
+  modelOptionsWithCurrent,
+  normalizeStoredSettings,
+} from './validate';
+import { isSafeModelId } from '../dsh-config';
+// The page uses the validation helpers, and these re-exports also keep
+// `import … from './settings'` working for every existing caller after the
+// C-2 split — `export *` re-exports the names into this module's scope too.
+export * from './types';
+export * from './validate';
 
 /**
- * Known model ids and their display labels.
+ * The settings page (Obsidian's 1.13 declarative API).
  *
- * This is no longer the selectable list — that is `DshSettings.models`, which
- * the user owns and edits. This table only supplies (a) the first-run seed and
- * (b) a friendly, localized label for ids it recognises; anything else is shown
- * as its raw id.
- *
- * `deepseek-flash` is DeepSeek's *rolling alias* on the official endpoint —
- * the API repoints that id to its newest model (V4.1 Flash as of 2026-09-10).
- * It is seeded first because that is a useful default, but the plugin makes no
- * "automatically tracks the latest" promise: the alias only rolls on the
- * official API, and a third-party gateway may pin it or not serve it at all.
- * Whether it keeps pointing at the newest model is DeepSeek's business, not
- * something this label should assert.
- *
- * `labelKey` marks entries whose label is UI copy rather than a brand name;
- * brand names stay untranslated (see `modelLabel`). Adding an id here also
- * requires an entry in `MODEL_CONTEXT_WINDOWS` (pure.ts) and in
- * `OPENCODE_GO_PROVIDER_FALLBACK` (dsh-runner.ts) — guarded by tests.
+ * Split out of settings.ts (review C-2). The data shape is `./types` and the
+ * validation rules are `./validate`; both are re-exported below so
+ * `import … from './settings'` keeps working for every existing caller.
  */
-export const MODEL_OPTIONS = [
-  { id: 'deepseek-flash', label: 'DeepSeek Flash' },
-  { id: 'deepseek-v4-flash', label: 'DeepSeek V4 Flash' },
-  { id: 'deepseek-v4-pro', label: 'DeepSeek V4 Pro' },
-  { id: 'deepseek-v4-flash-vision-exp', label: 'DeepSeek V4 Flash Vision (Exp)' },
-] as const;
-
-export const REASONING_OPTIONS = [
-  { id: 'off', label: 'Off' },
-  { id: 'high', label: 'High' },
-  { id: 'max', label: 'Max' },
-] as const;
-
-// Hardcoded English labels, matching the DSH app's security-mode selector
-// (kebab-case → Title Case, with "danger-full-access" shown as "Full access").
-// Kept intentionally outside i18n: they never change with the UI language.
-export const PERMISSION_OPTIONS = [
-  { id: 'read-only', label: 'Read Only' },
-  { id: 'workspace-write', label: 'Workspace Write' },
-  { id: 'danger-full-access', label: 'Full access' },
-] as const;
-
-/** Union types derived from the option lists above (see §4.5 of HANDOFF.md). */
-export type ProviderId = typeof PROVIDER_OPTIONS[number]['id'];
-/** The built-in model ids. `DshSettings.model` is deliberately wider — the
- *  user may add any id to their model list. */
-export type ModelId = typeof MODEL_OPTIONS[number]['id'];
-export type ReasoningEffort = typeof REASONING_OPTIONS[number]['id'];
-export type PermissionMode = typeof PERMISSION_OPTIONS[number]['id'];
-
-/**
- * Friendly label for a model id the plugin recognises, else the raw id.
- *
- * Labels are plain brand names and are never localized, so this is a lookup
- * rather than an i18n call — an honest name beats a translated descriptor that
- * could promise something the alias does not guarantee.
- */
-export function modelLabel(id: string): string {
-  return MODEL_OPTIONS.find((x) => x.id === id)?.label ?? id;
-}
-
-/** Tool execution modes ('' = DSH default). Kept as an option list so the type
- *  and the settings dropdown cannot drift apart. */
-export const TOOL_EXECUTION_MODES = ['', 'native', 'code', 'both'] as const;
-export type ToolExecutionMode = typeof TOOL_EXECUTION_MODES[number];
-
-/** Non-localized labels for the non-empty tool modes ('' shows the localized
- *  'Default (native)' label). */
-const TOOL_EXECUTION_LABELS: Record<Exclude<ToolExecutionMode, ''>, string> = {
-  native: 'Native',
-  code: 'Code',
-  both: 'Both',
-};
-
-/** Label for a permission mode id (used in chat + settings). Never localized. */
-export function permissionLabel(id: PermissionMode): string {
-  const o = PERMISSION_OPTIONS.find((x) => x.id === id);
-  return o ? o.label : id;
-}
-
-/** DshSettings keys whose stored value is pattern-checked on load. */
-export type OptionFieldKey =
-  | 'provider'
-  | 'model'
-  | 'reasoningEffort'
-  | 'permissionMode'
-  | 'toolExecutionMode';
-
-const REASONING_IDS: readonly string[] = REASONING_OPTIONS.map((o) => o.id);
-const PERMISSION_IDS: readonly string[] = PERMISSION_OPTIONS.map((o) => o.id);
-const TOOL_MODE_IDS: readonly string[] = [...TOOL_EXECUTION_MODES];
-
-/**
- * Load-time validator per stored key.
- *
- * `model` and `provider` used to be closed enums, and that membership check
- * doubled as the YAML injection guard: both values are pasted straight into
- * the generated `settings.yaml`. They are open now — the user may type any
- * model id, and DSH may declare any provider route — so the guard moves from
- * "is in a fixed list" to an explicit character-set check
- * (`isSafeModelId` / `isSafeProviderId`). The genuinely closed fields keep
- * their list check.
- */
-const FIELD_VALIDATORS: Record<OptionFieldKey, (value: unknown) => boolean> = {
-  provider: (v) => typeof v === 'string' && isSafeProviderId(v),
-  model: (v) => typeof v === 'string' && isSafeModelId(v),
-  reasoningEffort: (v) => typeof v === 'string' && REASONING_IDS.includes(v),
-  permissionMode: (v) => typeof v === 'string' && PERMISSION_IDS.includes(v),
-  toolExecutionMode: (v) => typeof v === 'string' && TOOL_MODE_IDS.includes(v),
-};
-
-/**
- * Display label for a model id.
- *
- * Ids the plugin recognises get a friendly label; anything else is shown as
- * its raw id, which is the honest answer for a value the user typed
- * themselves — no guessing, and no label that promises more than it can keep.
- */
-export function modelDisplayLabel(id: string): string {
-  return MODEL_OPTIONS.some((m) => m.id === id) ? modelLabel(id) : id;
-}
-
-/** The dropdown contents for a user-owned model list. */
-export function buildModelOptions(models: readonly string[]): { id: string; label: string }[] {
-  return models.map((id) => ({ id, label: modelDisplayLabel(id) }));
-}
-
-/** The provider dropdown's contents. Providers are still a fixed pair. */
-export function buildProviderOptions(): { id: string; label: string }[] {
-  return PROVIDER_OPTIONS.map((p) => ({ id: p.id, label: p.label }));
-}
-
-/**
- * The model list as the dropdown needs it, with the selected id guaranteed to
- * be present.
- *
- * `normalizeStoredSettings` keeps `model` inside `models`, so this is a
- * belt-and-braces guard for the window between a delete and the next save:
- * Obsidian is told to `setValue` the active id, and a value with no matching
- * option would leave the control blank and misreport the active model.
- */
-export function modelOptionsWithCurrent(
-  models: readonly string[],
-  current: string,
-): { id: string; label: string }[] {
-  const out = buildModelOptions(models);
-  if (current && !out.some((o) => o.id === current)) {
-    out.push({ id: current, label: modelDisplayLabel(current) });
-  }
-  return out;
-}
-
-/**
- * Merge imported ids into the list, keeping the user's order and dropping
- * anything already present.
- *
- * Used by the explicit "import from DSH" action. Duplicates are the common
- * case — a stock catalog overlaps the seed almost entirely — so the result is
- * the caller's list plus only what is genuinely new.
- */
-export function mergeModelIds(
-  existing: readonly string[],
-  incoming: readonly string[],
-): { models: string[]; added: string[] } {
-  const seen = new Set(existing);
-  const models = [...existing];
-  const added: string[] = [];
-  for (const id of incoming) {
-    if (!isSafeModelId(id) || seen.has(id)) continue;
-    seen.add(id);
-    models.push(id);
-    added.push(id);
-  }
-  return { models, added };
-}
-
-/**
- * P1-5: validate settings read from the plugin data file and fall back to the
- * DEFAULT_SETTINGS value whenever a stored field is unusable (a model id no
- * longer valid, a hand-edited data.json, a value that could not be written
- * into the generated YAML safely). Non-option fields keep their stored values.
- * `reset` lists the fields that were corrected, so the caller can heal the
- * file and surface one notice.
- */
-export function normalizeStoredSettings(
-  raw: unknown,
-): { settings: DshSettings; reset: OptionFieldKey[] } {
-  const stored = (typeof raw === 'object' && raw !== null ? raw : {}) as Record<string, unknown>;
-  const settings = Object.assign({}, DEFAULT_SETTINGS, stored) as DshSettings;
-  const reset: OptionFieldKey[] = [];
-  // One-release migration: `modelCustom` was a second, competing home for the
-  // active model. Its value is already reflected in `model` (or was a
-  // duplicate of it), so dropping the key loses nothing a user can observe —
-  // and leaving it behind would keep a stale override lying in data.json.
-  delete (settings as unknown as Record<string, unknown>).modelCustom;
-  // Fallbacks are written through a plain record: fields here are validated
-  // dynamically, and TypeScript cannot assign across distinct union keys via
-  // a single index access (their intersection is `never`).
-  const target = settings as unknown as Record<string, unknown>;
-  for (const field of Object.keys(FIELD_VALIDATORS) as OptionFieldKey[]) {
-    if (!Object.prototype.hasOwnProperty.call(stored, field)) continue;
-    if (!FIELD_VALIDATORS[field](stored[field])) {
-      target[field] = DEFAULT_SETTINGS[field];
-      reset.push(field);
-    }
-  }
-
-  // The model list is user-owned, so it is sanitized rather than validated
-  // against a fixed set: unusable ids are dropped (they could not be written
-  // into the generated YAML), duplicates collapse, and order is preserved.
-  // An empty or unreadable list falls back to the seed, because the plugin
-  // needs at least one selectable model to be usable at all.
-  const rawList = stored.models;
-  if (Array.isArray(rawList)) {
-    const seen = new Set<string>();
-    const list: string[] = [];
-    for (const entry of rawList) {
-      if (typeof entry !== 'string') continue;
-      const id = entry.trim();
-      if (!isSafeModelId(id) || seen.has(id)) continue;
-      seen.add(id);
-      list.push(id);
-    }
-    settings.models = list.length > 0 ? list : [...DEFAULT_SETTINGS.models];
-  } else {
-    settings.models = [...DEFAULT_SETTINGS.models];
-  }
-
-  // Keep the selection selectable. Adding it is the right repair rather than
-  // replacing it: `model` may come from a data.json written before the list
-  // existed (or a hand edit), and silently switching the user to a different
-  // model would change what the agent runs behind their back. Only a value
-  // that could not be written to the generated YAML at all is replaced.
-  if (!settings.models.includes(settings.model)) {
-    if (isSafeModelId(settings.model)) {
-      settings.models = [...settings.models, settings.model];
-    } else {
-      settings.model = settings.models[0];
-    }
-  }
-
-  return { settings, reset };
-}
 
 export class DshSettingTab extends PluginSettingTab {
   plugin: DshPlugin;
@@ -390,7 +61,11 @@ export class DshSettingTab extends PluginSettingTab {
   }
 
   getSettingDefinitions(): SettingDefinitionItem[] {
-    const s = this.plugin.settings;
+    // Every read and write below goes through `this.plugin.settings` and never
+    // through a captured snapshot: these render callbacks fire later (and their
+    // onChange handlers later still), so a captured reference would keep
+    // writing into an object that `loadSettings()`'s wholesale replacement has
+    // already orphaned — changes that appear to save and silently do not.
     const render = (
       name: string,
       desc: string | undefined,
@@ -417,8 +92,8 @@ export class DshSettingTab extends PluginSettingTab {
               dd.addOption('auto', 'Auto');
               dd.addOption('en', 'English');
               dd.addOption('zh', '中文');
-              dd.setValue(s.language).onChange(async (value) => {
-                s.language = value as DshSettings['language'];
+              dd.setValue(this.plugin.settings.language).onChange(async (value) => {
+                this.plugin.settings.language = value as DshSettings['language'];
                 // Apply the locale BEFORE persisting: saveSettings() notifies
                 // settings listeners (chat trigger labels), which must render
                 // in the NEW language rather than the old one.
@@ -432,9 +107,9 @@ export class DshSettingTab extends PluginSettingTab {
           render(t('settings.workdir.name'), t('settings.workdir.desc'), (setting) => {
             setting.addText((text) => text
               .setPlaceholder(t('settings.workdir.placeholder'))
-              .setValue(s.workdir)
+              .setValue(this.plugin.settings.workdir)
               .onChange(async (value) => {
-                s.workdir = value;
+                this.plugin.settings.workdir = value;
                 await this.plugin.saveSettings();
               }));
           }),
@@ -442,18 +117,18 @@ export class DshSettingTab extends PluginSettingTab {
           render(t('settings.timeout.name'), t('settings.timeout.desc'), (setting) => {
             setting.addSlider((slider) => slider
               .setLimits(30, 1800, 30)
-              .setValue(s.timeoutSec)
+              .setValue(this.plugin.settings.timeoutSec)
               .onChange(async (value) => {
-                s.timeoutSec = value;
+                this.plugin.settings.timeoutSec = value;
                 await this.plugin.saveSettings();
               }));
           }),
 
           render(t('settings.memory.name'), t('settings.memory.desc'), (setting) => {
             setting.addToggle((toggle) => toggle
-              .setValue(s.memoryEnabled)
+              .setValue(this.plugin.settings.memoryEnabled)
               .onChange(async (value) => {
-                s.memoryEnabled = value;
+                this.plugin.settings.memoryEnabled = value;
                 await this.plugin.saveSettings();
               }));
           }),
@@ -461,9 +136,9 @@ export class DshSettingTab extends PluginSettingTab {
           render(t('settings.historyLimit.name'), t('settings.historyLimit.desc'), (setting) => {
             setting.addSlider((slider) => slider
               .setLimits(10, 200, 10)
-              .setValue(s.historyLimit)
+              .setValue(this.plugin.settings.historyLimit)
               .onChange(async (value) => {
-                s.historyLimit = value;
+                this.plugin.settings.historyLimit = value;
                 await this.plugin.saveSettings();
                 this.plugin.history?.setLimit(value);
               }));
@@ -480,21 +155,21 @@ export class DshSettingTab extends PluginSettingTab {
               for (const p of buildProviderOptions()) {
                 dd.addOption(p.id, p.label);
               }
-              dd.setValue(s.provider).onChange(async (value) => {
-                s.provider = value;
+              dd.setValue(this.plugin.settings.provider).onChange(async (value) => {
+                this.plugin.settings.provider = value;
                 await this.plugin.saveSettings();
               });
             });
           }),
 
           render(t('settings.model.name'), t('settings.model.desc'), (setting) => {
-            const options = modelOptionsWithCurrent(s.models, s.model);
+            const options = modelOptionsWithCurrent(this.plugin.settings.models, this.plugin.settings.model);
             setting.addDropdown((dd) => {
               modelDropdown = dd;
               for (const m of options) dd.addOption(m.id, m.label);
-              dd.setValue(s.model).onChange(async (value) => {
-                if (value === s.model) return;
-                s.model = value;
+              dd.setValue(this.plugin.settings.model).onChange(async (value) => {
+                if (value === this.plugin.settings.model) return;
+                this.plugin.settings.model = value;
                 await this.plugin.saveSettings();
               });
             });
@@ -513,7 +188,7 @@ export class DshSettingTab extends PluginSettingTab {
 
             const redraw = (): void => {
               rows.empty();
-              for (const id of s.models) {
+              for (const id of this.plugin.settings.models) {
                 const row = rows.createDiv({ cls: 'dsh-model-row' });
                 row.createSpan({ text: modelDisplayLabel(id), cls: 'dsh-model-row-label' });
                 row.createSpan({ text: id, cls: 'dsh-model-row-id' });
@@ -523,19 +198,19 @@ export class DshSettingTab extends PluginSettingTab {
                 });
                 // Keep at least one model: an empty dropdown would leave the
                 // plugin with nothing to run and no obvious way back.
-                del.disabled = s.models.length <= 1;
+                del.disabled = this.plugin.settings.models.length <= 1;
                 del.onclick = async () => {
-                  s.models = s.models.filter((x) => x !== id);
+                  this.plugin.settings.models = this.plugin.settings.models.filter((x) => x !== id);
                   // Deleting the active model is an explicit act, so switching
                   // the selection to the first survivor is expected here (the
                   // load-time normalizer never switches it silently).
-                  if (s.model === id) s.model = s.models[0];
+                  if (this.plugin.settings.model === id) this.plugin.settings.model = this.plugin.settings.models[0];
                   await this.plugin.saveSettings();
                   redraw();
                   refreshDropdown();
                 };
               }
-              countEl.setText(t('settings.modelList.count', { count: String(s.models.length) }));
+              countEl.setText(t('settings.modelList.count', { count: String(this.plugin.settings.models.length) }));
             };
 
             // Rebuild the dropdown in place so a removal or addition shows up
@@ -544,10 +219,10 @@ export class DshSettingTab extends PluginSettingTab {
               const dd = modelDropdown;
               if (!dd) return;
               dd.selectEl.empty();
-              for (const m of modelOptionsWithCurrent(s.models, s.model)) {
+              for (const m of modelOptionsWithCurrent(this.plugin.settings.models, this.plugin.settings.model)) {
                 dd.addOption(m.id, m.label);
               }
-              dd.setValue(s.model);
+              dd.setValue(this.plugin.settings.model);
             };
 
             setting.addText((text) => {
@@ -568,7 +243,7 @@ export class DshSettingTab extends PluginSettingTab {
                 }
                 input?.inputEl.removeClass('dsh-input-invalid');
                 if (input) input.inputEl.title = '';
-                s.models = mergeModelIds(s.models, [next]).models;
+                this.plugin.settings.models = mergeModelIds(this.plugin.settings.models, [next]).models;
                 input?.setValue('');
                 await this.plugin.saveSettings();
                 redraw();
@@ -586,8 +261,8 @@ export class DshSettingTab extends PluginSettingTab {
                   this.plugin.app.vault.configDir,
                 );
                 const found = (runner.userDshConfig()?.models ?? []).map((m) => m.id);
-                const { models, added } = mergeModelIds(s.models, found);
-                s.models = models;
+                const { models, added } = mergeModelIds(this.plugin.settings.models, found);
+                this.plugin.settings.models = models;
                 await this.plugin.saveSettings();
                 redraw();
                 refreshDropdown();
@@ -610,8 +285,8 @@ export class DshSettingTab extends PluginSettingTab {
           render(t('settings.reasoning.name'), t('settings.reasoning.desc'), (setting) => {
             setting.addDropdown((dd) => {
               for (const r of REASONING_OPTIONS) dd.addOption(r.id, r.label);
-              dd.setValue(s.reasoningEffort).onChange(async (value) => {
-                s.reasoningEffort = value as ReasoningEffort;
+              dd.setValue(this.plugin.settings.reasoningEffort).onChange(async (value) => {
+                this.plugin.settings.reasoningEffort = value as ReasoningEffort;
                 await this.plugin.saveSettings();
               });
             });
@@ -626,9 +301,9 @@ export class DshSettingTab extends PluginSettingTab {
           render(t('settings.permission.name'), t('settings.permission.desc'), (setting) => {
             setting.addDropdown((dd) => {
               for (const p of PERMISSION_OPTIONS) dd.addOption(p.id, permissionLabel(p.id));
-              dd.setValue(s.permissionMode).onChange(async (value) => {
+              dd.setValue(this.plugin.settings.permissionMode).onChange(async (value) => {
                 await this.plugin.setPermissionMode(value as PermissionMode);
-                dd.setValue(s.permissionMode);
+                dd.setValue(this.plugin.settings.permissionMode);
               });
             });
           }),
@@ -639,8 +314,8 @@ export class DshSettingTab extends PluginSettingTab {
                 const label = mode === '' ? t('settings.toolModeDefault') : TOOL_EXECUTION_LABELS[mode];
                 dd.addOption(mode, label);
               }
-              dd.setValue(s.toolExecutionMode).onChange(async (value) => {
-                s.toolExecutionMode = value as ToolExecutionMode;
+              dd.setValue(this.plugin.settings.toolExecutionMode).onChange(async (value) => {
+                this.plugin.settings.toolExecutionMode = value as ToolExecutionMode;
                 await this.plugin.saveSettings();
               });
             });
@@ -648,18 +323,18 @@ export class DshSettingTab extends PluginSettingTab {
 
           render(t('settings.showThinking.name'), t('settings.showThinking.desc'), (setting) => {
             setting.addToggle((toggle) => toggle
-              .setValue(s.showThinking)
+              .setValue(this.plugin.settings.showThinking)
               .onChange(async (value) => {
-                s.showThinking = value;
+                this.plugin.settings.showThinking = value;
                 await this.plugin.saveSettings();
               }));
           }),
 
           render(t('settings.showTools.name'), t('settings.showTools.desc'), (setting) => {
             setting.addToggle((toggle) => toggle
-              .setValue(s.showTools)
+              .setValue(this.plugin.settings.showTools)
               .onChange(async (value) => {
-                s.showTools = value;
+                this.plugin.settings.showTools = value;
                 await this.plugin.saveSettings();
               }));
           }),
@@ -672,9 +347,9 @@ export class DshSettingTab extends PluginSettingTab {
         items: [
           render(t('settings.obsidianSkill.name'), t('settings.obsidianSkill.desc'), (setting) => {
             setting.addToggle((toggle) => toggle
-              .setValue(s.obsidianSkill)
+              .setValue(this.plugin.settings.obsidianSkill)
               .onChange(async (value) => {
-                s.obsidianSkill = value;
+                this.plugin.settings.obsidianSkill = value;
                 await this.plugin.saveSettings();
               }));
           }),
@@ -682,9 +357,9 @@ export class DshSettingTab extends PluginSettingTab {
           render(t('settings.extraSkillDirs.name'), t('settings.extraSkillDirs.desc'), (setting) => {
             setting.addText((text) => text
               .setPlaceholder(t('settings.extraSkillDirs.placeholder'))
-              .setValue(s.extraSkillDirs)
+              .setValue(this.plugin.settings.extraSkillDirs)
               .onChange(async (value) => {
-                s.extraSkillDirs = value;
+                this.plugin.settings.extraSkillDirs = value;
                 await this.plugin.saveSettings();
               }));
             // Folder picker: novice-friendly way to add vault folders without
@@ -693,9 +368,9 @@ export class DshSettingTab extends PluginSettingTab {
               .setButtonText(t('settings.extraSkillDirs.pick'))
               .onClick(() => {
                 new FolderSuggestModal(this.app, (picked) => {
-                  const existing = s.extraSkillDirs.split(',').map((x) => x.trim()).filter(Boolean);
+                  const existing = this.plugin.settings.extraSkillDirs.split(',').map((x) => x.trim()).filter(Boolean);
                   if (!existing.includes(picked)) existing.push(picked);
-                  s.extraSkillDirs = existing.join(', ');
+                  this.plugin.settings.extraSkillDirs = existing.join(', ');
                   void this.plugin.saveSettings();
                   this.update();
                 }).open();
@@ -712,9 +387,9 @@ export class DshSettingTab extends PluginSettingTab {
             setting.addTextArea((text) => {
               text
                 .setPlaceholder(t('settings.persona.placeholder'))
-                .setValue(s.customPersona)
+                .setValue(this.plugin.settings.customPersona)
                 .onChange(async (value) => {
-                  s.customPersona = value;
+                  this.plugin.settings.customPersona = value;
                   await this.plugin.saveSettings();
                 });
               text.inputEl.rows = 3;
@@ -730,9 +405,9 @@ export class DshSettingTab extends PluginSettingTab {
           render(t('settings.dshBin.name'), t('settings.dshBin.desc'), (setting) => {
             setting.addText((text) => text
               .setPlaceholder(t('settings.dshBin.placeholder'))
-              .setValue(s.dshBin)
+              .setValue(this.plugin.settings.dshBin)
               .onChange(async (value) => {
-                s.dshBin = value;
+                this.plugin.settings.dshBin = value;
                 await this.plugin.saveSettings();
               }));
           }),
@@ -740,9 +415,9 @@ export class DshSettingTab extends PluginSettingTab {
           render(t('settings.nodeBin.name'), t('settings.nodeBin.desc'), (setting) => {
             setting.addText((text) => text
               .setPlaceholder(t('settings.nodeBin.placeholder'))
-              .setValue(s.nodeBin)
+              .setValue(this.plugin.settings.nodeBin)
               .onChange(async (value) => {
-                s.nodeBin = value;
+                this.plugin.settings.nodeBin = value;
                 await this.plugin.saveSettings();
               }));
           }),
@@ -750,9 +425,9 @@ export class DshSettingTab extends PluginSettingTab {
           render(t('settings.dshHome.name'), t('settings.dshHome.desc'), (setting) => {
             setting.addText((text) => text
               .setPlaceholder(t('settings.dshHome.placeholder'))
-              .setValue(s.dshHome)
+              .setValue(this.plugin.settings.dshHome)
               .onChange(async (value) => {
-                s.dshHome = value;
+                this.plugin.settings.dshHome = value;
                 await this.plugin.saveSettings();
               }));
           }),
@@ -763,15 +438,15 @@ export class DshSettingTab extends PluginSettingTab {
             const warningEl = setting.descEl.createDiv({ cls: 'dsh-setting-warning' });
             warningEl.setText(t('settings.apiKey.warning'));
             const applyWarning = (): void => {
-              warningEl.style.display = s.apiKey ? '' : 'none';
+              warningEl.style.display = this.plugin.settings.apiKey ? '' : 'none';
             };
             applyWarning();
             setting.addText((text) => {
               text
                 .setPlaceholder(t('settings.apiKey.placeholder'))
-                .setValue(s.apiKey)
+                .setValue(this.plugin.settings.apiKey)
                 .onChange(async (value) => {
-                  s.apiKey = value.trim();
+                  this.plugin.settings.apiKey = value.trim();
                   await this.plugin.saveSettings();
                   applyWarning();
                 });

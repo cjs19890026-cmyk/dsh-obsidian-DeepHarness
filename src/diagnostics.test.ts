@@ -1,9 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
   buildCheckOutcomes,
   buildRepairPrompt,
   CHECK_HINT_KEYS,
   CHECK_LABEL_KEYS,
+  checkWritableDir,
+  checkWritableFile,
   failures,
   hasFailures,
   type CheckId,
@@ -187,5 +192,61 @@ describe('buildCheckOutcomes', () => {
     );
     expect(hasFailures(out)).toBe(true);
     expect(buildRepairPrompt(out, CTX)).toContain('dsh not found');
+  });
+});
+
+/**
+ * The write probes. These two used to live in settings.ts, tangled up with the
+ * settings page, which is why they had no tests: reaching them meant standing
+ * up the whole UI. Moving them here (review C-2) is what makes this file
+ * possible.
+ */
+describe('writability probes', () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-diag-probe-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('reports a writable directory as fine and leaves nothing behind', () => {
+    const target = path.join(dir, 'generated');
+    expect(checkWritableDir(target)).toBeNull();
+    // It writes a probe file to prove writability, then removes it.
+    expect(fs.readdirSync(target)).toEqual([]);
+  });
+
+  it('reports an error, not a throw, when the directory cannot be created', () => {
+    // A regular file where a directory is needed: deterministic ENOTDIR on
+    // every platform, and unlike chmod it cannot be defeated by running as root.
+    const asFile = path.join(dir, 'not-a-dir');
+    fs.writeFileSync(asFile, 'x', 'utf8');
+    const error = checkWritableDir(path.join(asFile, 'child'));
+    expect(error).toBeTruthy();
+    expect(typeof error).toBe('string');
+  });
+
+  it('accepts a writable file', () => {
+    const file = path.join(dir, 'settings.yaml');
+    fs.writeFileSync(file, 'a: 1', 'utf8');
+    expect(checkWritableFile(file)).toBeNull();
+  });
+
+  it('defers to the parent directory when the file does not exist yet', () => {
+    // A missing settings.yaml is the normal first-run state: it is only a
+    // problem if its directory could not hold it.
+    const nested = path.join(dir, 'dsh-home');
+    expect(checkWritableFile(path.join(nested, 'settings.yaml'))).toBeNull();
+    expect(fs.existsSync(nested)).toBe(true);
+  });
+
+  it('reports an error when a missing file has nowhere to be created', () => {
+    const asFile = path.join(dir, 'blocker');
+    fs.writeFileSync(asFile, 'x', 'utf8');
+    const error = checkWritableFile(path.join(asFile, 'settings.yaml'));
+    expect(error).toBeTruthy();
   });
 });
