@@ -8,7 +8,6 @@ import { setLocale, resolveLocale, getLocale, t } from './i18n';
 
 export default class DshPlugin extends Plugin {
   settings!: DshSettings;
-  private vaultPatchInvalidated = false;
   private commandsRegistered = false;
   /** P2-K: open chat views. Obsidian may skip onClose() on unload, so the
    *  plugin tears each view down explicitly (see onunload). */
@@ -137,11 +136,6 @@ export default class DshPlugin extends Plugin {
 
   private notifyLocaleChange(): void {
     for (const listener of this.localeChangeListeners) listener();
-  }
-
-  /** Force regeneration of the persona patch (custom persona changed). */
-  invalidateVaultPatch(): void {
-    this.vaultPatchInvalidated = true;
   }
 
   /**

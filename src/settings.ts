@@ -715,7 +715,6 @@ export class DshSettingTab extends PluginSettingTab {
                 .onChange(async (value) => {
                   s.customPersona = value;
                   await this.plugin.saveSettings();
-                  this.plugin.invalidateVaultPatch();
                 });
               text.inputEl.rows = 3;
             });
