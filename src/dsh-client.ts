@@ -116,6 +116,19 @@ export const DSH_ENV_ALLOWLIST: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * The subset of DshRunOptions that buildDshEnv actually reads.
+ *
+ * Kept separate so non-run callers (the settings-page diagnostic) can build
+ * the same child environment without inventing a cwd / timeout they have no
+ * use for — and so a future allowlist entry has exactly one place to be
+ * threaded through.
+ */
+export type DshEnvOptions = Pick<
+  DshRunOptions,
+  'dshHome' | 'apiKey' | 'provider' | 'toolsMode' | 'permissionMode' | 'env' | 'nodeBin'
+>;
+
+/**
  * Build the child environment for a dsh run without leaking the plugin's whole
  * process.env.
  *
@@ -128,7 +141,7 @@ export const DSH_ENV_ALLOWLIST: ReadonlySet<string> = new Set([
  *    the agent's own bash tool can still find node/npm.
  */
 export function buildDshEnv(
-  opts: DshRunOptions,
+  opts: DshEnvOptions,
   sourceEnv: Readonly<Record<string, string | undefined>>,
 ): Record<string, string> {
   const env: Record<string, string> = {};

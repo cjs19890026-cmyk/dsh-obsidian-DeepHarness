@@ -2,7 +2,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { DshRunner, type PreparationIssue } from './dsh-runner';
+import { DshRunner, diagnosticProbe, type PreparationIssue } from './dsh-runner';
+import { DSH_ENV_ALLOWLIST } from './dsh-client';
 import type { DshSettings } from './settings';
 
 /**
@@ -553,5 +554,42 @@ describe('DshRunner inherits the user DSH_HOME config', () => {
     settings.dshHome = path.join(dir, 'does-not-exist');
     runner = new DshRunner(settings, '.obsidian');
     expect(runner.userDshConfig()).toBeNull();
+  });
+});
+
+describe('diagnosticProbe (D-2: the version probe uses the env whitelist)', () => {
+  const bin = '/opt/homebrew/bin/dsh';
+  const nodeBin = '/opt/homebrew/bin/node';
+  const script = '/opt/homebrew/lib/node_modules/dsh/bin.js';
+  const dshHome = '/Users/me/.dsh';
+
+  it('prefers node <script> so the shebang cannot break under Electron', () => {
+    const probe = diagnosticProbe(bin, nodeBin, script, dshHome);
+    expect(probe.cmd).toBe(nodeBin);
+    expect(probe.args).toEqual([script, '--version']);
+  });
+
+  it('falls back to the binary itself when it is not node-runnable', () => {
+    expect(diagnosticProbe(bin, null, null, dshHome)).toMatchObject({
+      cmd: bin,
+      args: ['--version'],
+    });
+    expect(diagnosticProbe(bin, nodeBin, null, dshHome).cmd).toBe(bin);
+  });
+
+  it('points the probe at the configured DSH_HOME', () => {
+    expect(diagnosticProbe(bin, nodeBin, script, dshHome).env.DSH_HOME).toBe(dshHome);
+  });
+
+  it('never hands the child the plugin process secrets or whole environment', () => {
+    const env = diagnosticProbe(bin, nodeBin, script, dshHome).env;
+    // The probe must not carry credentials around: no API key is injected.
+    expect(env.DEEPSEEK_API_KEY).toBeUndefined();
+    expect(env.OPENCODE_GO_API_KEY).toBeUndefined();
+    // And it is the allowlist, not `{...process.env}`: a random variable from
+    // the plugin's own process must not reach the child.
+    for (const key of Object.keys(env)) {
+      expect(DSH_ENV_ALLOWLIST.has(key) || key === 'DSH_HOME').toBe(true);
+    }
   });
 });

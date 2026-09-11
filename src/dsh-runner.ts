@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
 import { versionCmp, streamRelayPatchYaml, shimJsTarget, resolveVaultRelativeDir } from './pure';
-import type { DshDiagnostics } from './dsh-client';
+import { buildDshEnv, type DshDiagnostics } from './dsh-client';
 import type { DshSettings } from './settings';
 import { ensureObsidianSkill as writeObsidianSkill, MEMORY_FILE } from './obsidian-skill';
 import { t, getLocale } from './i18n';
@@ -71,6 +71,32 @@ function writeFileAtomicSync(file: string, content: string): void {
   const tmp = `${file}.tmp`;
   fs.writeFileSync(tmp, content, 'utf8');
   fs.renameSync(tmp, file);
+}
+
+/**
+ * Command + environment for the settings page's `dsh --version` probe.
+ *
+ * Split out of `diagnose()` so the D-2 guarantee is testable without spawning
+ * anything: the probe runs under the same {@link buildDshEnv} whitelist as a
+ * real task, never the plugin's whole `process.env`. The plugin API key is
+ * deliberately not injected — `--version` needs no credentials, and a
+ * diagnostic should not carry secrets around.
+ *
+ * `node <script>` is preferred so the probe works under Electron's restricted
+ * PATH, where the `dsh` shebang (`#!/usr/bin/env node`) cannot find node.
+ */
+export function diagnosticProbe(
+  bin: string,
+  nodeBin: string | null,
+  script: string | null,
+  dshHome: string,
+): { cmd: string; args: string[]; env: Record<string, string> } {
+  const useNodeDirect = Boolean(script && nodeBin);
+  return {
+    cmd: useNodeDirect ? nodeBin! : bin,
+    args: script && nodeBin ? [script, '--version'] : ['--version'],
+    env: buildDshEnv({ nodeBin: nodeBin ?? undefined, dshHome }, process.env),
+  };
 }
 
 
@@ -277,14 +303,10 @@ export class DshRunner {
       return { bin: '', found: false, version: null, error: 'not-found', nodeBin };
     }
     try {
-      const script = this.resolveDshScript(bin);
-      // Prefer `node <script> --version` (bypasses the shebang under Electron's
-      // restricted PATH); when the bin isn't node-runnable, invoke it directly.
-      const cmd = script && nodeBin ? nodeBin : bin;
-      const args = script && nodeBin ? [script, '--version'] : ['--version'];
-      const { stdout } = await execFileAsync(cmd, args, {
+      const probe = diagnosticProbe(bin, nodeBin, this.resolveDshScript(bin), this.dshHome());
+      const { stdout } = await execFileAsync(probe.cmd, probe.args, {
         timeout: 10000,
-        env: { ...process.env as Record<string, string>, DSH_HOME: this.dshHome() },
+        env: probe.env,
       });
       return { bin, found: true, version: stdout.trim(), error: null, nodeBin };
     } catch (e) {

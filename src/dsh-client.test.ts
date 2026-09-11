@@ -266,7 +266,7 @@ describe('buildDshEnv (env whitelist)', () => {
       AWS_SECRET_ACCESS_KEY: 'shh',
       MY_APP_TOKEN: 'nope',
     };
-    const env = buildDshEnv({ dshBin: '/fake/dsh', cwd: '/tmp/vault' }, source);
+    const env = buildDshEnv({}, source);
     expect(env).toEqual({
       PATH: '/usr/bin:/bin',
       HOME: '/home/user',
@@ -275,15 +275,13 @@ describe('buildDshEnv (env whitelist)', () => {
   });
 
   it('keeps the child env minimal when nothing is configured', () => {
-    const env = buildDshEnv({ dshBin: '/fake/dsh', cwd: '/tmp/vault' }, {});
+    const env = buildDshEnv({}, {});
     expect(Object.keys(env)).toHaveLength(0);
   });
 
   it('merges opts.env entries (explicit plugin opt-in) over the allowlist', () => {
     const env = buildDshEnv(
       {
-        dshBin: '/fake/dsh',
-        cwd: '/tmp/vault',
         env: { MY_FEATURE_FLAG: '1', PATH: '/opt/custom/bin:/usr/bin' },
       },
       { PATH: '/usr/bin:/bin', HOME: '/home/user' },
@@ -295,7 +293,7 @@ describe('buildDshEnv (env whitelist)', () => {
 
   it('injects the API key as DEEPSEEK_API_KEY for the default provider', () => {
     const env = buildDshEnv(
-      { dshBin: '/fake/dsh', cwd: '/tmp/vault', apiKey: 'sk-1' },
+      { apiKey: 'sk-1' },
       {},
     );
     expect(env.DEEPSEEK_API_KEY).toBe('sk-1');
@@ -305,8 +303,6 @@ describe('buildDshEnv (env whitelist)', () => {
   it('injects plugin-owned vars and lets them win over opts.env', () => {
     const env = buildDshEnv(
       {
-        dshBin: '/fake/dsh',
-        cwd: '/tmp/vault',
         dshHome: '/tmp/dsh-home',
         apiKey: 'sk-abc',
         provider: 'opencode-go',
@@ -329,10 +325,7 @@ describe('buildDshEnv (env whitelist)', () => {
   it('prepends the node dir to PATH when spawning node directly', () => {
     const env = buildDshEnv(
       {
-        dshBin: '/fake/dsh',
         nodeBin: '/opt/node/bin/node',
-        dshScript: '/fake/dsh/bin.js',
-        cwd: '/tmp/vault',
       },
       { PATH: '/usr/bin:/bin' },
     );
@@ -346,9 +339,7 @@ describe('buildDshEnv (env whitelist)', () => {
       : '/usr/bin:/bin';
     const env = buildDshEnv(
       {
-        dshBin: '/fake/dsh',
         nodeBin: '/opt/node/bin/node',
-        cwd: '/tmp/vault',
       },
       { HOME: '/home/user' },
     );
