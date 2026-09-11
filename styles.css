@@ -824,6 +824,196 @@
   color: var(--text-error);
 }
 
+/* Update available: neither an error nor a success. */
+.dsh-check-warn {
+  color: var(--text-warning, #d08700);
+}
+
+/* Custom model ID field holding a value that cannot be written to settings.yaml. */
+.dsh-input-invalid {
+  border-color: var(--text-error) !important;
+  box-shadow: 0 0 0 1px var(--text-error) !important;
+}
+
+/* ── Environment check report ───────────────────────────── */
+
+/* Bounded like the model box: a stack of failing paths must not be able to
+   stretch the settings page, and long paths must wrap instead of spilling
+   past the border. */
+.dsh-check-box {
+  margin: 6px 0 2px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background-color: var(--background-secondary);
+  overflow: hidden;
+}
+
+.dsh-check-box:empty {
+  display: none;
+}
+
+.dsh-check-list {
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 6px 10px;
+}
+
+.dsh-check-row {
+  padding: 4px 0;
+  border-bottom: 1px solid var(--background-modifier-border-hover);
+}
+
+.dsh-check-row:last-child {
+  border-bottom: none;
+}
+
+.dsh-check-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-weight: var(--font-medium);
+}
+
+.dsh-check-row.is-ok .dsh-check-icon {
+  color: var(--text-success, #4caf50);
+}
+
+.dsh-check-row.is-fail .dsh-check-icon {
+  color: var(--text-error);
+}
+
+/* Paths have no spaces to break at, so allow a break anywhere. */
+.dsh-check-detail,
+.dsh-check-error,
+.dsh-check-hint {
+  margin-left: 18px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.dsh-check-detail {
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+}
+
+.dsh-check-error {
+  color: var(--text-error);
+  font-size: var(--font-ui-smaller);
+}
+
+.dsh-check-hint {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+.dsh-check-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+.dsh-check-actions.is-hidden {
+  display: none;
+}
+
+.dsh-check-copy-note {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
+/* ── Diagnostic report preview ──────────────────────────── */
+.dsh-prompt-modal {
+  width: min(720px, 90vw);
+}
+
+.dsh-prompt-preview {
+  width: 100%;
+  resize: vertical;
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  white-space: pre;
+}
+
+/* Stacked variant of a settings row: description on top, the list and the
+   add/import controls underneath, so one control can own the full width. */
+.dsh-setting-stacked {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+
+.dsh-setting-stacked .setting-item-info {
+  width: 100%;
+  margin-right: 0;
+}
+
+.dsh-setting-stacked .setting-item-control {
+  width: 100%;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+/* The list is user-grown, so it is the one control that can become
+   arbitrarily tall. Bounding it keeps the settings page a stable length no
+   matter how many models an import brings in. */
+.dsh-model-box {
+  margin: 6px 0 2px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background-color: var(--background-secondary);
+  overflow: hidden;
+}
+
+.dsh-model-list {
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 2px 8px;
+}
+
+.dsh-model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+  border-bottom: 1px solid var(--background-modifier-border-hover);
+}
+
+.dsh-model-row:last-child {
+  border-bottom: none;
+}
+
+.dsh-model-row-label {
+  flex: 0 0 auto;
+  font-weight: var(--font-medium);
+}
+
+.dsh-model-row-id {
+  flex: 1 1 auto;
+  color: var(--text-muted);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dsh-model-row-remove {
+  flex: 0 0 auto;
+}
+
+.dsh-model-count {
+  padding: 4px 8px;
+  border-top: 1px solid var(--background-modifier-border);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+}
+
 /* Inline risk warning shown under the API key setting (P2-D). */
 .dsh-setting-warning {
   color: var(--text-warning, #d29922);

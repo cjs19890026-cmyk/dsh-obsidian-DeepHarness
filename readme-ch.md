@@ -36,7 +36,7 @@
 
 这种做法的优势很直接：**能力不缩水**——执行层下沉到 DSH runtime，插件只做进程桥接与 UI（设计参考 Claudian，但避免了在插件里重写 agent），DSH 每升级一次模型、工具或技能，插件自动受益；**边界清晰、可观测**——流式显示思考过程与工具调用日志，可随时停止、超时兜底，并用三级安全模式控制文件权限；**本地优先、不污染配置**——凭据默认复用本机 `~/.dsh`，可选插件专属 API Key，模型/推理设置写入插件专属 DSH_HOME，不影响 DSH 桌面端。
 
-功能上开箱即得：**模型默认「最新模型(自动跟随)」（DeepSeek 滚动别名，始终指向官方最新模型）、off / high / max 推理强度、会话历史（恢复 / 置顶 / 重命名 / 备注）、@ 提及与 `[[wikilink]]` 引用、回答自动出链、长期记忆 `Harness/memory.md`、内置 Obsidian 技能、一键复制 / 存为笔记、中英文界面**。
+功能上开箱即得：**可自行维护的模型列表（官方出新模型时直接填 ID 即可，不用等插件更新）、off / high / max 推理强度、会话历史（恢复 / 置顶 / 重命名 / 备注）、@ 提及与 `[[wikilink]]` 引用、回答自动出链、长期记忆 `Harness/memory.md`、内置 Obsidian 技能、一键复制 / 存为笔记、中英文界面**。
 
 ---
 
@@ -166,7 +166,7 @@ Copy-Item dist\main.js, dist\manifest.json, dist\styles.css "$V\.obsidian\plugin
 
 ### 🧠 模型与运行控制
 
-- **模型选择器**：默认 **最新模型(自动跟随)**——DeepSeek 的滚动别名 `deepseek-flash`，官方新模型上线后接口会把它指向最新版，**无需改设置、无需等插件更新**；顶栏也可切换到固定快照（V4 Flash / V4 Pro / V4 Flash Vision Exp）。
+- **模型选择器 + 模型列表**：下拉框里的模型由设置页的「模型列表」决定,可以随时增删,内置的那几个也能删。官方出新模型时**直接填 ID 加一行就能用,不用等插件更新**。另有「从 DSH 导入」按钮,按一下才读取你自己 DSH 配置里声明的模型 ID(不点就不读)。默认模型为 `deepseek-flash`(官方 API 的滚动别名)。
 - **推理等级（Thinking）**：顶栏可切换 **off / high / max**。
   - 通过插件专属 DSH_HOME（`dsh-home/` 目录）写入 `agent-default-model` 配置，凭据软链复用 `~/.dsh`，**不污染**全局 DSH 设置。
 - **安全模式（Security）**：只读 / 工作区写入 / 完全访问；切入「完全访问」必须二次确认。
@@ -200,7 +200,7 @@ Copy-Item dist\main.js, dist\manifest.json, dist\styles.css "$V\.obsidian\plugin
 | 任务超时 | 600s | 超时自动停止 |
 | 对话记忆 | 开 | 上下文回填 |
 | 工具执行模式 | 默认（native） | native / code / both（工具后端，不是文件沙箱开关） |
-| 模型（Model） | 最新模型(自动跟随) | 滚动别名 `deepseek-flash`，始终指向官方最新模型；顶栏可切换到固定快照 |
+| 模型（Model） | `deepseek-flash` | 由下方的「模型列表」决定;填任意模型 ID 即可使用比插件更新的模型 |
 | 推理等级（Thinking） | high | off / high / max，顶栏可切换 |
 | 安全模式（Security） | 工作区写入 | 只读 / 工作区写入 / 完全访问 |
 | 显示思考过程 | 开 | 回答前显示可折叠思考过程 |

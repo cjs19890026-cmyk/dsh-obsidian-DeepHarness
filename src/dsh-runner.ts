@@ -8,6 +8,7 @@ import type { DshDiagnostics } from './dsh-client';
 import type { DshSettings } from './settings';
 import { ensureObsidianSkill as writeObsidianSkill, MEMORY_FILE } from './obsidian-skill';
 import { t, getLocale } from './i18n';
+import { extractTopLevelBlock, readDshSettings, type DshConfigSnapshot } from './dsh-config';
 
 const execFileAsync = promisify(execFile);
 
@@ -133,27 +134,6 @@ export const OPENCODE_GO_PROVIDER_FALLBACK = [
   '          contextWindow: 131072',
 ];
 
-/** Extract a top-level YAML block (e.g. `llm-pi-ai:`) from a settings file. */
-function extractTopLevelBlock(text: string, key: string): string | null {
-  const lines = text.split(/\r?\n/);
-  let start = -1;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.trimStart() === line && line.startsWith(`${key}:`)) {
-      start = i;
-      break;
-    }
-  }
-  if (start === -1) return null;
-  const block = [lines[start]];
-  for (let i = start + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (line.trimStart() === line && /^[A-Za-z0-9_.-]+:/.test(line)) break;
-    block.push(line);
-  }
-  return block.join('\n');
-}
-
 /**
  * Source of the stream-relay DSH plugin injected via --patch.
  * It listens on the live `session/event` stream and emits real-time
@@ -247,6 +227,13 @@ function isNodeScript(p: string): boolean {
 }
 
 export class DshRunner {
+  /**
+   * Memo for `userDshConfig`, keyed on the settings file's mtime. Held per
+   * runner instance; runners are cheap and short-lived, so this only has to
+   * absorb repeated reads within one render or one run.
+   */
+  private userConfigCache: { mtimeMs: number; snapshot: DshConfigSnapshot | null } | null = null;
+
   constructor(
     private settings: DshSettings,
     private configDir: string,
@@ -415,6 +402,44 @@ export class DshRunner {
     return path.join(vaultRoot, this.configDir, 'plugins', 'deepharness', 'dsh-home');
   }
 
+  /** Raw text of the user's real `$DSH_HOME/settings.yaml`, or null. */
+  private readUserSettingsText(): string | null {
+    try {
+      const file = path.join(this.dshHome(), 'settings.yaml');
+      if (!fs.existsSync(file)) return null;
+      return fs.readFileSync(file, 'utf8');
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The user's own DSH catalog: models under `llm-deepseek`, provider routes
+   * under `llm-pi-ai`.
+   *
+   * Memoized on the file's mtime because callers include the chat toolbar,
+   * which recomputes labels far more often than the user edits `settings.yaml`.
+   * An mtime change is the only invalidation needed: the desktop app rewrites
+   * the file on every settings save. Returns null when the file is absent or
+   * unreadable, and every consumer falls back to the built-in lists.
+   */
+  userDshConfig(): DshConfigSnapshot | null {
+    const file = path.join(this.dshHome(), 'settings.yaml');
+    try {
+      const mtimeMs = fs.statSync(file).mtimeMs;
+      if (this.userConfigCache && this.userConfigCache.mtimeMs === mtimeMs) {
+        return this.userConfigCache.snapshot;
+      }
+      const snapshot = readDshSettings(this.dshHome());
+      this.userConfigCache = { mtimeMs, snapshot };
+      return snapshot;
+    } catch {
+      // Missing file, or a stat/read race with the desktop app rewriting it.
+      this.userConfigCache = null;
+      return null;
+    }
+  }
+
   ensurePluginDshHome(
     vaultRoot: string,
     sel: { model: string; effort: string },
@@ -440,27 +465,33 @@ export class DshRunner {
         }
       }
       // The selected provider consumes `agent-default-model` (provider/model)
-      // plus its reasoningEffort. Custom providers (e.g. OpenCode Go) also
-      // need their `llm-pi-ai.providers.*` definition, which we inherit from
-      // the user's real DSH_HOME settings when available.
+      // plus its reasoningEffort. Custom routes (e.g. OpenCode Go) also need
+      // their `llm-pi-ai.providers.*` definition, which we inherit from the
+      // user's real DSH_HOME settings when they have one.
+      //
+      // The user's `llm-deepseek.models` catalog is deliberately *not*
+      // inherited: the plugin's model list is owned by the user (see
+      // `DshSettings.models`), and pulling in a catalog that only exists for
+      // people who opened DSH's own model settings is what made the same
+      // plugin behave differently for different users. DSH is perfectly happy
+      // with an id it has no catalog entry for — it falls back to the
+      // connection defaults — so nothing here depends on that catalog.
       const provider = this.settings.provider || 'deepseek-official';
       const settingsLines: string[] = [];
+      const userSettings = this.readUserSettingsText();
+
+      const piAi = userSettings ? extractTopLevelBlock(userSettings, 'llm-pi-ai') : null;
       if (provider === 'opencode-go') {
-        const src = path.join(this.dshHome(), 'settings.yaml');
-        let block: string | null = null;
-        try {
-          if (fs.existsSync(src)) {
-            block = extractTopLevelBlock(fs.readFileSync(src, 'utf8'), 'llm-pi-ai');
-          }
-        } catch {
-          block = null;
-        }
-        if (block) {
-          settingsLines.push(block.trimEnd());
+        if (piAi) {
+          settingsLines.push(piAi.trimEnd());
         } else {
+          // Only this route needs a synthetic definition to work at all: it is
+          // the one built-in option whose provider block a stock DSH_HOME may
+          // not declare.
           settingsLines.push(...OPENCODE_GO_PROVIDER_FALLBACK);
         }
       }
+
       settingsLines.push(
         'agent-default-model:',
         `  provider: ${provider}`,

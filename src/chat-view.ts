@@ -6,7 +6,7 @@ import { DshRunner, type PreparationIssue } from './dsh-runner';
 import { buildTitleEntries, linkifyNoteTitles, type NoteInfo, type NoteTitleEntry } from './linkify';
 import { scanSkillRoots, type SkillEntry, type ScanRoot } from './skills';
 import { SkillSuggest } from './skill-suggest';
-import { MODEL_OPTIONS, REASONING_OPTIONS, PERMISSION_OPTIONS, modelLabel, permissionLabel, type PermissionMode } from './settings';
+import { REASONING_OPTIONS, PERMISSION_OPTIONS, modelDisplayLabel, modelOptionsWithCurrent, permissionLabel, type PermissionMode } from './settings';
 import { ContextMeter, estimateTokens } from './context-meter';
 import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir, frontmatterAliases, partialTurnAnswer } from './pure';
 import { HistoryTool } from './history';
@@ -207,7 +207,7 @@ export class ChatView extends ItemView {
     this.securityTrigger.onclick = (e) => this.showSecurityMenu(e);
 
     // Context usage ring
-    this.contextMeter = new ContextMeter(toolbar, contextWindowFor(this.plugin.settings.model));
+    this.contextMeter = new ContextMeter(toolbar, this.contextWindow());
 
     // Send button (capsule)
     this.sendButton = toolbar.createEl('button', { cls: 'dsh-send-btn', text: t('chat.send') });
@@ -267,7 +267,7 @@ export class ChatView extends ItemView {
     const r = REASONING_OPTIONS.find((x) => x.id === this.plugin.settings.reasoningEffort);
     const nameEl = this.modelTrigger.querySelector('.dsh-trigger-model-name') as HTMLElement;
     const effortEl = this.modelTrigger.querySelector('.dsh-trigger-effort') as HTMLElement;
-    if (nameEl) nameEl.textContent = modelLabel(this.plugin.settings.model);
+    if (nameEl) nameEl.textContent = modelDisplayLabel(this.plugin.settings.model);
     if (effortEl) effortEl.textContent = `· ${r ? r.label : this.plugin.settings.reasoningEffort}`;
     const secLabel = this.securityTrigger.querySelector('.dsh-trigger-security-label') as HTMLElement;
     const p = PERMISSION_OPTIONS.find((x) => x.id === this.plugin.settings.permissionMode);
@@ -277,16 +277,28 @@ export class ChatView extends ItemView {
       this.plugin.settings.permissionMode === 'danger-full-access',
     );
     // Keep the context meter's denominator in sync with the selected model.
-    this.contextMeter?.setContextWindow(contextWindowFor(this.plugin.settings.model));
+    this.contextMeter?.setContextWindow(this.contextWindow());
   }
 
-  /** Model + reasoning effort menu (two sections in one popup). */
+  /** Context window of the active model, preferring the user's own DSH catalog. */
+  private contextWindow(): number {
+    return contextWindowFor(this.plugin.settings.model);
+  }
+
+  /**
+   * Model + reasoning effort menu (two sections in one popup).
+   *
+   * The model list is rebuilt on every open rather than captured once, so a
+   * model the user adds in DSH shows up without reloading the plugin — that is
+   * the whole point of reading the catalog at runtime.
+   */
   private showModelMenu(evt: MouseEvent): void {
     const menu = new Menu();
-    for (const m of MODEL_OPTIONS) {
+    const current = this.plugin.settings.model;
+    for (const m of modelOptionsWithCurrent(this.plugin.settings.models, current)) {
       menu.addItem((item) => item
-        .setTitle(modelLabel(m.id))
-        .setChecked(m.id === this.plugin.settings.model)
+        .setTitle(m.label)
+        .setChecked(m.id === current)
         .onClick(() => {
           this.plugin.settings.model = m.id;
           void this.plugin.saveSettings();

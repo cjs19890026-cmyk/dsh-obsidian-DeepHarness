@@ -254,6 +254,7 @@ export default class DshPlugin extends Plugin {
     this.notifySettingsChange();
   }
 
+
   /**
    * Subscribe to settings saves (returns an unsubscribe fn). Views that render
    * settings-derived labels (model / effort / permission triggers) use this to

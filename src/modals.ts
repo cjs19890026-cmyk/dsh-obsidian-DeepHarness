@@ -106,3 +106,56 @@ export class FolderSuggestModal extends FuzzySuggestModal<string> {
     this.onPick(item);
   }
 }
+
+/**
+ * Preview-and-copy dialog for the environment-check report.
+ *
+ * The text is shown in full and read-only before anything reaches the
+ * clipboard. The report contains local absolute paths, so a silent copy would
+ * be the wrong default even though the user is the one who pressed the button.
+ */
+export class DiagnosticPromptModal extends Modal {
+  constructor(
+    app: App,
+    private prompt: string,
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.empty();
+    contentEl.addClass('dsh-prompt-modal');
+    contentEl.createEl('h3', { text: t('settings.check.copyTitle') });
+    contentEl.createEl('p', { text: t('settings.check.copyDesc') });
+
+    const area = contentEl.createEl('textarea', { cls: 'dsh-prompt-preview' });
+    area.value = this.prompt;
+    area.readOnly = true;
+    area.rows = 16;
+
+    new Setting(contentEl)
+      .addButton((button) => button
+        .setButtonText(t('settings.check.copyConfirm'))
+        .setCta()
+        .onClick(async () => {
+          // Same API the chat view's copy button uses. It is async, so a
+          // rejection (no permission, no focus) must be reported rather than
+          // swallowed — the report is the entire point of this dialog.
+          try {
+            await navigator.clipboard.writeText(this.prompt);
+            new Notice(t('settings.check.copied'));
+            this.close();
+          } catch {
+            new Notice(t('settings.check.copyFailed'));
+          }
+        }))
+      .addButton((button) => button
+        .setButtonText(t('settings.check.copyCancel'))
+        .onClick(() => this.close()));
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}

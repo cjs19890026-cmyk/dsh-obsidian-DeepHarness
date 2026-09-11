@@ -92,6 +92,7 @@ describe('DshRunner.buildTask and workdir', () => {
       customPersona: '',
       toolExecutionMode: '',
       model: 'deepseek-v4-flash',
+      models: ['deepseek-flash', 'deepseek-v4-flash'],
       reasoningEffort: 'high',
       permissionMode: 'workspace-write',
       showThinking: true,
@@ -206,6 +207,7 @@ describe('DshRunner generated-file writes are atomic', () => {
       customPersona: '',
       toolExecutionMode: '',
       model: 'deepseek-v4-flash',
+      models: ['deepseek-flash', 'deepseek-v4-flash'],
       reasoningEffort: 'high',
       permissionMode: 'workspace-write',
       showThinking: true,
@@ -284,6 +286,7 @@ describe('DshRunner preparation degradation reporting (P1-3)', () => {
       customPersona: '',
       toolExecutionMode: '',
       model: 'deepseek-v4-flash',
+      models: ['deepseek-flash', 'deepseek-v4-flash'],
       reasoningEffort: 'high',
       permissionMode: 'workspace-write',
       showThinking: true,
@@ -404,5 +407,151 @@ describe('DshRunner preparation degradation reporting (P1-3)', () => {
     const issues: PreparationIssue[] = [];
     expect(runner.ensureMemoryFile(vaultRoot, issues)).toBeNull();
     expect(codes(issues)).toEqual(['memory-file']);
+  });
+});
+
+describe('DshRunner inherits the user DSH_HOME config', () => {
+  let dir: string;
+  let vaultRoot: string;
+  let userHome: string;
+  let settings: DshSettings;
+  let runner: DshRunner;
+
+  const USER_SETTINGS = [
+    'agent-default-model:',
+    '  provider: deepseek-official',
+    '  model: deepseek-flash',
+    'llm-deepseek:',
+    '  models:',
+    '    - id: deepseek-v4-flash',
+    '      name: DeepSeek-V4-Flash',
+    '      description: wrapped onto a continuation line',
+    '        that a naive reader would misread',
+    '      contextWindow: 1000000',
+    '    - id: deepseek-flash',
+    '      name: DeepSeek-V41-Flash',
+    'llm-pi-ai:',
+    '  providers:',
+    '    my-gateway:',
+    '      displayName: My Gateway',
+    '      baseURL: https://gw.example/v1',
+    '',
+  ].join('\n');
+
+  function makeSettings(provider: string): DshSettings {
+    return {
+      dshBin: '',
+      nodeBin: '',
+      dshHome: userHome,
+      models: ['deepseek-flash'],
+      workdir: '',
+      timeoutSec: 600,
+      memoryEnabled: true,
+      language: 'auto',
+      customPersona: '',
+      toolExecutionMode: '',
+      model: 'deepseek-flash',
+      reasoningEffort: 'high',
+      permissionMode: 'workspace-write',
+      showThinking: true,
+      showTools: true,
+      historyLimit: 50,
+      obsidianSkill: true,
+      extraSkillDirs: '',
+      apiKey: '',
+      provider,
+    };
+  }
+
+  function readPluginYaml(): string {
+    const home = runner.ensurePluginDshHome(vaultRoot, { model: 'deepseek-flash', effort: 'high' });
+    expect(home).not.toBeNull();
+    return fs.readFileSync(path.join(home as string, 'settings.yaml'), 'utf8');
+  }
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-runner-inherit-'));
+    vaultRoot = path.join(dir, 'vault');
+    userHome = path.join(dir, 'user-dsh');
+    fs.mkdirSync(vaultRoot);
+    fs.mkdirSync(userHome, { recursive: true });
+    fs.writeFileSync(path.join(userHome, 'settings.yaml'), USER_SETTINGS);
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('does NOT copy the llm-deepseek catalog into the plugin home', () => {
+    // The model list is owned by the plugin's own settings. Inheriting a
+    // catalog that only exists for users who opened DSH's model settings is
+    // exactly the invisible, client-dependent behaviour that was removed.
+    settings = makeSettings('deepseek-official');
+    runner = new DshRunner(settings, '.obsidian');
+    const yaml = readPluginYaml();
+    expect(yaml).not.toContain('llm-deepseek:');
+    expect(yaml).not.toContain('DeepSeek-V41-Flash');
+    // The generated file is only the selection, as before.
+    expect(yaml).toContain('model: deepseek-flash');
+  });
+
+  it('copies the user\'s llm-pi-ai block for the opencode-go route', () => {
+    settings = makeSettings('opencode-go');
+    runner = new DshRunner(settings, '.obsidian');
+    const yaml = readPluginYaml();
+    expect(yaml).toContain('my-gateway:');
+    expect(yaml).toContain('baseURL: https://gw.example/v1');
+    expect(yaml).toContain('provider: opencode-go');
+  });
+
+  it('keeps the opencode-go synthetic fallback when the user declares no llm-pi-ai', () => {
+    fs.writeFileSync(
+      path.join(userHome, 'settings.yaml'),
+      'llm-deepseek:\n  models:\n    - id: deepseek-flash\n',
+    );
+    settings = makeSettings('opencode-go');
+    runner = new DshRunner(settings, '.obsidian');
+    const yaml = readPluginYaml();
+    expect(yaml).toContain('opencode-go:');
+    expect(yaml).toContain('OPENCODE_GO_API_KEY');
+  });
+
+  it('does not invent a provider block for an unknown route', () => {
+    fs.writeFileSync(
+      path.join(userHome, 'settings.yaml'),
+      'llm-deepseek:\n  models:\n    - id: deepseek-flash\n',
+    );
+    settings = makeSettings('some-unconfigured-route');
+    runner = new DshRunner(settings, '.obsidian');
+    const yaml = readPluginYaml();
+    expect(yaml).not.toContain('OPENCODE_GO_API_KEY');
+    expect(yaml).toContain('provider: some-unconfigured-route');
+  });
+
+  it('still writes agent-default-model when the user has no settings.yaml', () => {
+    fs.rmSync(path.join(userHome, 'settings.yaml'));
+    settings = makeSettings('deepseek-official');
+    runner = new DshRunner(settings, '.obsidian');
+    const yaml = readPluginYaml();
+    expect(yaml).toContain('provider: deepseek-official');
+    expect(yaml).toContain('model: deepseek-flash');
+    expect(yaml).not.toContain('llm-deepseek:');
+  });
+
+  it('exposes the user catalog and provider routes, memoized on mtime', () => {
+    settings = makeSettings('deepseek-official');
+    runner = new DshRunner(settings, '.obsidian');
+    const snap = runner.userDshConfig();
+    expect(snap?.models.map((m) => m.id)).toEqual(['deepseek-v4-flash', 'deepseek-flash']);
+    expect(snap?.providers.map((p) => p.id)).toEqual(['my-gateway']);
+    // Same mtime => the same memoized object, not a re-read.
+    expect(runner.userDshConfig()).toBe(snap);
+  });
+
+  it('reports null rather than throwing when the DSH_HOME is unreadable', () => {
+    settings = makeSettings('deepseek-official');
+    settings.dshHome = path.join(dir, 'does-not-exist');
+    runner = new DshRunner(settings, '.obsidian');
+    expect(runner.userDshConfig()).toBeNull();
   });
 });

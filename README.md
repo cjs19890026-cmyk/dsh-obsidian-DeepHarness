@@ -65,7 +65,7 @@ After enabling the plugin, click the bot icon in the left ribbon to open the cha
 ## Features
 
 - 💬 **Chat panel**: send a task → status indicator (starting / thinking / elapsed) → Markdown-rendered result
-- 🧠 **Model selector**: defaults to **Latest model (auto-tracking)** — DeepSeek's rolling alias (`deepseek-flash`), which the API repoints to the newest model, so a new version never requires changing this setting. Pinned snapshots (V4 Flash / V4 Pro / V4 Flash Vision Exp) are switchable from the panel toolbar
+- 🧠 **Model list you own**: the model dropdown is fed by an editable list in the settings, so a model DeepSeek shipped after this plugin release can be added by typing its id — no plugin update needed. Entries can be added or removed at any time, and the built-in ones can be deleted too. An **Import from DSH** button pulls in the ids your own DSH settings declare, only when you press it. Defaults to `deepseek-flash` (DeepSeek's rolling alias on the official API)
 - ⚙️ **Reasoning effort (Thinking)**: switch **off / high / max** in the toolbar
   - Written to the plugin-owned DSH_HOME (`dsh-home/` directory) via the `agent-default-model` config; credentials are symlinked from `~/.dsh` — the global DSH settings are **never polluted**
 - ⏹ **Stop button** (SIGTERM) and a timeout fallback (default 10 minutes)
@@ -92,7 +92,7 @@ After enabling the plugin, click the bot icon in the left ribbon to open the cha
 | Task timeout | 600s | Auto-stops the run when exceeded |
 | Conversation memory | on | Context refill |
 | Tool execution mode | default (native) | native / code / both (tool backend, not a file sandbox) |
-| Model | Latest model (auto-tracking) | Rolling DeepSeek alias (`deepseek-flash`) that always resolves to the newest model; pinned snapshots are switchable from the panel toolbar |
+| Model | `deepseek-flash` | Selected from the editable **Model list** below it; add any model id to use a model newer than this plugin release |
 | Reasoning effort | high | off / high / max; switchable from the toolbar |
 | Security mode | workspace write | read-only / workspace write / full access |
 | Show thinking | on | Collapsible thinking block before the answer |
