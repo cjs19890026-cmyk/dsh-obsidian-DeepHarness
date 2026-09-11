@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { DshRunner, diagnosticProbe, type PreparationIssue } from './dsh-runner';
 import { DSH_ENV_ALLOWLIST } from './dsh-client';
-import type { DshSettings } from '../settings/index';
+import { DEFAULT_SETTINGS, type DshSettings } from '../settings/index';
 
 /**
  * extraSkillDirs containment at the DSH patch level: ensureSkillDirsPatch
@@ -591,5 +591,100 @@ describe('diagnosticProbe (D-2: the version probe uses the env whitelist)', () =
     for (const key of Object.keys(env)) {
       expect(DSH_ENV_ALLOWLIST.has(key) || key === 'DSH_HOME').toBe(true);
     }
+  });
+});
+
+describe('DshRunner.ensureVaultPatch persona regeneration', () => {
+  let dir: string;
+  let vaultRoot: string;
+  let generated: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-persona-'));
+    vaultRoot = path.join(dir, 'vault');
+    generated = path.join(vaultRoot, '.obsidian', 'plugins', 'deepharness', 'generated');
+    fs.mkdirSync(generated, { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** The real defaults, not a hand-copied subset: this path reads several
+   *  fields (customPersona, dshHome, …) and a partial cast silently produced no
+   *  file at all. */
+  const makeRunner = (overrides: Partial<DshSettings> = {}): DshRunner =>
+    new DshRunner({ ...DEFAULT_SETTINGS, ...overrides }, '.obsidian');
+
+  const personaFile = (): string => path.join(generated, 'vault.yml');
+  const bakFile = (): string => `${personaFile()}.bak`;
+
+  it('writes a persona carrying the current version marker', async () => {
+    const made = makeRunner();
+    await made.ensureVaultPatch(vaultRoot);
+    expect(fs.readFileSync(personaFile(), 'utf8')).toContain('deepharness-persona-v');
+  });
+
+  it('leaves a current file alone (no rewrite, no backup)', async () => {
+    const made = makeRunner();
+    await made.ensureVaultPatch(vaultRoot);
+    const first = fs.readFileSync(personaFile(), 'utf8');
+
+    await made.ensureVaultPatch(vaultRoot);
+    expect(fs.readFileSync(personaFile(), 'utf8')).toBe(first);
+    expect(fs.existsSync(bakFile())).toBe(false);
+  });
+
+  it('backs up the previous persona before regenerating a stale one', async () => {
+    // An older marker (version bump or UI-language change): the old file is
+    // preserved as .bak so user edits are never lost. This path had no test.
+    const stale = '# deepharness-persona-v4-en\nmy own edits\n';
+    fs.writeFileSync(personaFile(), stale, 'utf8');
+
+    const made = makeRunner();
+    await made.ensureVaultPatch(vaultRoot);
+
+    expect(fs.readFileSync(bakFile(), 'utf8')).toBe(stale);
+    const regenerated = fs.readFileSync(personaFile(), 'utf8');
+    expect(regenerated).not.toBe(stale);
+    expect(regenerated).toContain('deepharness-persona-v');
+  });
+
+  it('backs up even an untouched pre-v2 default file (behaviour change)', async () => {
+    // The removed renderLegacyPersonaYaml existed only to skip the backup when
+    // the file was byte-for-byte the v2 default. Three versions later
+    // (PERSONA_VERSION 5) its sole effect was suppressing one harmless .bak, so
+    // the backup is now unconditional. This test pins that: the old code left
+    // no .bak for exactly this input, the new code does.
+    const v2Default = [
+      '# 由 deepharness 生成。可自由编辑,插件不会覆盖此文件。',
+      '- id: system-prompt',
+      '  config:',
+      '    persona: >-',
+      '      你是运行在 Obsidian vault 里的 DeepSeek Harness 助手。',
+      '      你的工作目录 {{cwd}} 就是用户的 vault。',
+      '      规则:',
+      '      1. 新建笔记使用 Markdown + YAML frontmatter,笔记间用 [[wikilink]] 互链。',
+      '',
+    ].join('\n');
+    fs.writeFileSync(personaFile(), v2Default, 'utf8');
+
+    const made = makeRunner();
+    await made.ensureVaultPatch(vaultRoot);
+
+    expect(fs.readFileSync(personaFile(), 'utf8')).toContain('deepharness-persona-v5');
+    expect(fs.readFileSync(bakFile(), 'utf8')).toBe(v2Default);
+  });
+
+  it('regenerates when a custom persona is missing from the file', async () => {
+    const made = makeRunner({ customPersona: 'ALWAYS ANSWER IN LATIN' });
+    await made.ensureVaultPatch(vaultRoot);
+    const first = fs.readFileSync(personaFile(), 'utf8');
+
+    // Simulate the user wiping the custom block: the marker is still current,
+    // so only the customMissing check can catch this.
+    fs.writeFileSync(personaFile(), first.replace('ALWAYS ANSWER IN LATIN', ''), 'utf8');
+    await made.ensureVaultPatch(vaultRoot);
+    expect(fs.readFileSync(personaFile(), 'utf8')).toContain('ALWAYS ANSWER IN LATIN');
   });
 });

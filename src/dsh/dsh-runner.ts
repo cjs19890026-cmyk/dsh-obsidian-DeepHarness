@@ -739,12 +739,14 @@ export class DshRunner {
         const custom = this.settings.customPersona.trim();
         const customMissing = custom !== '' && !existing.includes(custom);
         if (!existing.includes(marker) || customMissing) {
-          // Stale or locale-mismatched file. Preserve any user edits as a
-          // .bak, then regenerate in the current locale.
-          const legacy = this.renderLegacyPersonaYaml();
-          if (existing.trim() !== legacy.trim()) {
-            try { writeFileAtomicSync(`${personaFile}.bak`, existing); } catch { /* ignore */ }
-          }
+          // Stale or locale-mismatched file. Back the old one up first, then
+          // regenerate in the current locale. The backup is unconditional: the
+          // previous code skipped it when the file matched the *v2* default
+          // byte for byte, to avoid leaving a .bak for users who had never
+          // edited it. That pre-v2 renderer is three generations back
+          // (PERSONA_VERSION is 5), so its only remaining effect was to suppress
+          // one harmless backup file for a handful of old installs.
+          try { writeFileAtomicSync(`${personaFile}.bak`, existing); } catch { /* ignore */ }
           writeFileAtomicSync(personaFile, this.renderPersonaYaml(this.buildPersonaLines(), marker));
         }
       }
@@ -806,30 +808,6 @@ export class DshRunner {
     return [
       marker,
       '# 由 deepharness 生成。可自由编辑;插件升级时可能重新生成(旧版会备份为 vault.yml.bak)。',
-      '- id: system-prompt',
-      '  config:',
-      '    persona: >-',
-      ...lines.map((line) => `      ${line}`),
-      '',
-    ].join('\n');
-  }
-
-  /** Reconstruct the pre-v2 default for migration comparison. */
-  private renderLegacyPersonaYaml(): string {
-    const lines = [
-      '你是运行在 Obsidian vault 里的 DeepSeek Harness 助手。',
-      '你的工作目录 {{cwd}} 就是用户的 vault。',
-      '规则:',
-      '1. 新建笔记使用 Markdown + YAML frontmatter,笔记间用 [[wikilink]] 互链。',
-      '2. 需要修改 vault 内文件时直接用文件工具完成,不要只给代码。',
-      '3. 删除/覆盖/移动等破坏性操作前,先向用户说明并征得同意。',
-      '4. 用用户消息的语言回答。',
-    ];
-    if (this.settings.customPersona.trim()) {
-      lines.push('', '附加用户指令:', this.settings.customPersona.trim());
-    }
-    return [
-      '# 由 deepharness 生成。可自由编辑,插件不会覆盖此文件。',
       '- id: system-prompt',
       '  config:',
       '    persona: >-',
