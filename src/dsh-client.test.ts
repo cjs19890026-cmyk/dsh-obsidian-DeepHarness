@@ -48,7 +48,6 @@ describe('DshClient killReason', () => {
     try {
       const result = await client.run('ignored', runOpts({ timeoutMs: 300 }));
       expect(result.killReason).toBe('timeout');
-      expect(result.killed).toBe(true);
       expect(result.exitCode).toBeNull();
     } finally {
       client.dispose();
@@ -63,7 +62,6 @@ describe('DshClient killReason', () => {
       globalThis.setTimeout(() => controller.abort(), 150);
       const result = await pending;
       expect(result.killReason).toBe('user');
-      expect(result.killed).toBe(true);
       expect(result.exitCode).toBeNull();
     } finally {
       client.dispose();
@@ -86,7 +84,6 @@ describe('DshClient killReason', () => {
         timeoutMs: 5000,
       });
       expect(result.killReason).toBeNull();
-      expect(result.killed).toBe(false);
       expect(result.exitCode).toBe(0);
     } finally {
       client.dispose();
@@ -228,7 +225,6 @@ describe('DshClient injected dependencies', () => {
       fake.callbacks[0]();
       const result = await pending;
       expect(result.killReason).toBe('timeout');
-      expect(result.killed).toBe(true);
       expect(result.exitCode).toBeNull();
       expect(fake.children[0].kill).toHaveBeenCalledWith('SIGTERM');
     } finally {
@@ -253,7 +249,6 @@ describe('DshClient injected dependencies', () => {
       controller.abort();
       const result = await pending;
       expect(result.killReason).toBe('user');
-      expect(result.killed).toBe(true);
       expect(fake.children[0].kill).toHaveBeenCalledWith('SIGTERM');
     } finally {
       client.dispose();

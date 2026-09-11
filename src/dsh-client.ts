@@ -68,9 +68,6 @@ export interface DshRunResult {
   stdout: string;
   stderr: string;
   durationMs: number;
-  /** True when terminated by user/timeout rather than by dsh itself
-   *  (kept for callers of the old shape; equals `killReason !== null`). */
-  killed: boolean;
   /** Why the run was terminated early, so the UI can tell a timeout
    *  apart from a user-initiated stop. null = dsh exited on its own. */
   killReason: 'timeout' | 'user' | null;
@@ -228,7 +225,6 @@ export class DshClient {
           stdout,
           stderr,
           durationMs: Date.now() - startedAt,
-          killed: killReason !== null,
           killReason,
         });
       };
