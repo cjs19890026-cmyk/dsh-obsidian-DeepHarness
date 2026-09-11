@@ -4,6 +4,7 @@ import { ChatView, VIEW_TYPE_CHAT } from './chat-view';
 import { SecurityConfirmModal } from './modals';
 import { DshClient } from './dsh-client';
 import { HistoryStore } from './history';
+import { pluginPaths } from './paths';
 import { setLocale, resolveLocale, getLocale, t } from './i18n';
 
 export default class DshPlugin extends Plugin {
@@ -21,9 +22,9 @@ export default class DshPlugin extends Plugin {
     this.applyLocale();
 
     // History store: human-readable task history in the plugin DSH_HOME.
-    // NOTE: vault.adapter paths are relative to the vault root (not absolute).
-    const configDir = this.app.vault.configDir;
-    const historyFile = `${configDir}/plugins/deepharness/dsh-home/history.json`;
+    // Paths come from paths.ts, the single owner of the on-disk layout.
+    const paths = pluginPaths(this.getVaultRoot(), this.app.vault.configDir);
+    const historyFile = paths.dshHomeFile('history.json');
     this.history = new HistoryStore(this.app, historyFile, this.settings.historyLimit);
     await this.history.load();
 

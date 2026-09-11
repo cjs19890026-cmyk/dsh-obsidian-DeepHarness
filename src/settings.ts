@@ -4,6 +4,7 @@ import * as path from 'path';
 import type DshPlugin from './main';
 import { t, Locale, type TranslationKey } from './i18n';
 import { DshRunner } from './dsh-runner';
+import { pluginPaths } from './paths';
 import { DiagnosticPromptModal, FolderSuggestModal } from './modals';
 import { isSafeModelId, isSafeProviderId } from './dsh-config';
 import { comparePluginVersion, fetchLatestRelease, type PluginUpdateStatus } from './updates';
@@ -868,11 +869,11 @@ export class DshSettingTab extends PluginSettingTab {
               const diag = await runner.diagnose();
 
               const vaultRoot = this.plugin.getVaultRoot();
-              const configDir = this.plugin.app.vault.configDir;
+              const paths = pluginPaths(vaultRoot, this.plugin.app.vault.configDir);
               const targets: Array<{ id: WriteProbe['id']; path: string; isFile: boolean }> = [
-                { id: 'generatedDir', path: path.join(vaultRoot, configDir, 'plugins', 'deepharness', 'generated'), isFile: false },
-                { id: 'pluginHome', path: path.join(vaultRoot, configDir, 'plugins', 'deepharness', 'dsh-home'), isFile: false },
-                { id: 'settingsYaml', path: path.join(vaultRoot, configDir, 'plugins', 'deepharness', 'dsh-home', 'settings.yaml'), isFile: true },
+                { id: 'generatedDir', path: paths.generatedDir, isFile: false },
+                { id: 'pluginHome', path: paths.dshHomeDir, isFile: false },
+                { id: 'settingsYaml', path: paths.dshHomeFile('settings.yaml'), isFile: true },
               ];
 
               const outcomes = buildCheckOutcomes(diag, targets.map((target) => ({

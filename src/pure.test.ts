@@ -15,6 +15,7 @@ import {
   partialTurnAnswer,
 } from './pure';
 import { estimateTokens } from './context-meter';
+import { PLUGIN_ID, pluginPaths } from './paths';
 
 describe('estimateTokens', () => {
   it('returns 0 for empty input', () => {
@@ -312,5 +313,48 @@ describe('partialTurnAnswer (P2-K)', () => {
     expect(partialTurnAnswer('', '', false, marker)).toBeNull();
     expect(partialTurnAnswer('DLEVENT\t{\"t\":\"think\"}\n', '', false, marker)).toBeNull();
     expect(partialTurnAnswer('   \n  ', '   ', false, marker)).toBeNull();
+  });
+});
+
+describe('pluginPaths (on-disk layout boundary)', () => {
+  // The plugin id folder name plus the generated/ and dsh-home/ layout are in
+  // use on installed vaults, so the planned "move dsh-home out of the vault"
+  // work must not shift these paths by accident.
+  const vault = path.join(path.sep, 'Users', 'tester', 'Documents', 'Vault');
+
+  it('keeps every plugin file under <vault>/<configDir>/plugins/deepharness', () => {
+    const p = pluginPaths(vault, '.obsidian');
+    const pluginDir = path.join(vault, '.obsidian', 'plugins', PLUGIN_ID);
+    expect(p.pluginDir).toBe(pluginDir);
+    expect(p.generatedDir).toBe(path.join(pluginDir, 'generated'));
+    expect(p.dshHomeDir).toBe(path.join(pluginDir, 'dsh-home'));
+  });
+
+  it('resolves generated overlays as absolute --patch arguments', () => {
+    const p = pluginPaths(vault, '.obsidian');
+    expect(p.generatedFile('vault.yml'))
+      .toBe(path.join(vault, '.obsidian', 'plugins', 'deepharness', 'generated', 'vault.yml'));
+    expect(path.isAbsolute(p.generatedFile('stream-relay.js'))).toBe(true);
+  });
+
+  it('resolves dsh-home files, including the history archive', () => {
+    const p = pluginPaths(vault, '.obsidian');
+    expect(p.dshHomeFile('settings.yaml'))
+      .toBe(path.join(vault, '.obsidian', 'plugins', 'deepharness', 'dsh-home', 'settings.yaml'));
+    expect(p.dshHomeFile('history.json'))
+      .toBe(path.join(vault, '.obsidian', 'plugins', 'deepharness', 'dsh-home', 'history.json'));
+  });
+
+  it('honours a non-default Obsidian config dir', () => {
+    expect(pluginPaths(vault, '.obsidian-custom').pluginDir)
+      .toBe(path.join(vault, '.obsidian-custom', 'plugins', 'deepharness'));
+  });
+
+  it('stays relative when the vault root is relative', () => {
+    // HistoryStore joins this onto the adapter base path, so the relative
+    // form must stay relative rather than silently becoming absolute.
+    const file = pluginPaths('', '.obsidian').dshHomeFile('history.json');
+    expect(path.isAbsolute(file)).toBe(false);
+    expect(file).toBe(path.join('.obsidian', 'plugins', 'deepharness', 'dsh-home', 'history.json'));
   });
 });

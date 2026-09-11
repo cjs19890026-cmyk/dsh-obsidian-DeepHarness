@@ -9,6 +9,7 @@ import type { DshSettings } from './settings';
 import { ensureObsidianSkill as writeObsidianSkill, MEMORY_FILE } from './obsidian-skill';
 import { t, getLocale } from './i18n';
 import { extractTopLevelBlock, readDshSettings, type DshConfigSnapshot } from './dsh-config';
+import { pluginPaths } from './paths';
 
 const execFileAsync = promisify(execFile);
 
@@ -399,7 +400,7 @@ export class DshRunner {
    */
   /** Absolute path of the plugin-owned DSH_HOME inside the vault. */
   pluginHomeDir(vaultRoot: string): string {
-    return path.join(vaultRoot, this.configDir, 'plugins', 'deepharness', 'dsh-home');
+    return pluginPaths(vaultRoot, this.configDir).dshHomeDir;
   }
 
   /** Raw text of the user's real `$DSH_HOME/settings.yaml`, or null. */
@@ -649,7 +650,7 @@ export class DshRunner {
       });
     }
     if (dirs.length === 0) return null;
-    const dir = path.join(vaultRoot, this.configDir, 'plugins', 'deepharness', 'generated');
+    const dir = pluginPaths(vaultRoot, this.configDir).generatedDir;
     const file = path.join(dir, 'skill-dirs.yml');
     try {
       fs.mkdirSync(dir, { recursive: true });
@@ -686,7 +687,7 @@ export class DshRunner {
     vaultRoot: string,
     issues?: PreparationIssue[],
   ): Promise<{ persona: string | null; think: string | null }> {
-    const dir = path.join(vaultRoot, this.configDir, 'plugins', 'deepharness', 'generated');
+    const dir = pluginPaths(vaultRoot, this.configDir).generatedDir;
     try {
       fs.mkdirSync(dir, { recursive: true });
       // Some environments create dirs without the execute bit, which breaks
