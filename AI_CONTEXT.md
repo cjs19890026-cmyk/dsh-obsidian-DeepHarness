@@ -30,7 +30,7 @@ src/dsh/                 与 DSH 运行时打交道的层
   dsh-client.ts          子进程桥:spawn node <dsh>/bin.js --profile headless,超时/取消(killReason)、env 白名单、依赖注入
   dsh-runner.ts          二进制/Node 探测、--patch 覆盖层生成(persona + stream-relay)、隔离 DSH_HOME、降级收集(862 行,后续可再拆)
   dsh-config.ts          窄口径读取用户 ~/.dsh/settings.yaml(模型目录 + provider 路由);isSafeModelId/isSafeProviderId(YAML 注入防线)
-  paths.ts               插件磁盘布局的唯一取址处(generated/ 与 dsh-home/)——dsh-home 迁出 vault 的前置
+  paths.ts               插件磁盘布局的唯一取址处(vault 内 generated/ + 系统侧 dsh-home/ + 路径包含判断)
   pure.ts                无 Obsidian 依赖的纯函数(parseHeadlessOutput / parseDshEventLine / resolveVaultRelativeDir 等)
 
 src/core/                领域服务与基础设施
@@ -76,8 +76,8 @@ MAINTENANCE.md           本地维护日志(被 .gitignore 忽略,不上线)
 
 1. **执行层下沉**:插件绝不自己实现 agent 逻辑,只 spawn `dsh` 并渲染 stdout/事件流
 2. **node 直跑 dsh 脚本**:`node <realpath>/bin.js`(绕过 Electron 受限 PATH 的 shebang 问题)
-3. **隔离 DSH_HOME**:每任务写 `dsh-home/settings.yaml`(model + reasoningEffort),
-   凭据软链复用用户 `~/.dsh`,不污染全局配置
+3. **隔离 DSH_HOME**:每任务写 `~/.dsh/deepharness/<vaultKey>/settings.yaml`(model + reasoningEffort),
+   凭据软链复用用户 `~/.dsh`,不污染全局配置,**且全程不在 vault 内**(2026-09-11 起)
 4. **patch 覆盖层**(`generated/` 目录):
    - `vault.yml` = persona(用户可编辑;带版本标记 `deepharness-persona-vN`,升级时旧版备份为 `.bak` 后重新生成)
    - `stream-relay.js` + `stream.yml` = 插件管理的流式中继,stdout 输出 `DLEVENT\t<json>`
@@ -107,8 +107,8 @@ npx tsc --noEmit         # 类型检查
 
 ## 不能改的边界(红线)
 
-- 插件 `id` 与文件夹名 `deepharness`:history.json、dsh-home、generated 的绝对路径依赖它
-  (注:2026-09-03 起规划把 dsh-home/history 迁出 vault 到系统目录,路径依赖随迁,id/文件夹名仍不变,见下方「已知待填坑」)
+- 插件 `id` 与文件夹名 `deepharness`:它决定 vault 内 `plugins/deepharness/`(`generated/`)与系统侧
+  `~/.dsh/deepharness/<vaultKey>/` 的绝对路径,永远不变。**取址一律走 `src/dsh/paths.ts`。**
 - `nodeBuiltins` 与 `obsidian` 必须保持 external,禁止打进 bundle
 - **不收集 API Key**:凭据只走用户本地 DSH_HOME / 环境变量,插件无外发网络请求
 - `DSH_PERMISSION_MODE`(沙箱模式)≠ `DSH_TOOLS_MODE`(工具后端),勿混淆(曾有历史 bug)
@@ -121,23 +121,37 @@ npx tsc --noEmit         # 类型检查
 发布到社区市场的完整步骤见 `docs/publish-checklist.md`。要点:tag 不带 `v`、
 Release 必须带 main.js/manifest.json/styles.css 三件套、仓库必须 public。
 
-## ⚠️ 已知待填坑(下次升级必读)
+## 已填的坑 / 仍待注意
 
-**插件 DSH_HOME 建在 vault 内部 = 架构缺陷,待修复**(详见本地 `MAINTENANCE.md` 顶部
-2026-09-03 条目)。用户 Issues 实证:Windows + iCloud Drive 下,`pluginHomeDir()`
-(`<vault>/.obsidian/plugins/deepharness/dsh-home`,dsh-runner.ts:372)被 dsh 首次运行
-自举出整棵 node_modules(几百包/数万文件)→ iCloud 同步卡死。
+### ✅ 插件 DSH_HOME 建在 vault 内部(架构缺陷,2026-09-11 已修)
 
-- **为什么现在没爆**:macOS 上自举条目是 symlink(530 链接/6.9MB);Windows 无开发者模式时
-  symlink 失败 → 实体拷贝 → 数万小文件进同步队列
-- **修复方向**:把插件专属 DSH_HOME 迁到系统用户目录(如 `~/.dsh/deepharness/<vaultKey>`
-  或 Obsidian userData),vault 内只留三件套 + 用户可编辑小文本;spawn 前断言 DSH_HOME
-  不在 vaultRoot 下;升级时检测/迁移/清理旧树
-- 红线第 1 条("dsh-home 绝对路径依赖 id")在迁出后需同步改写
+**曾经的症状**:Windows + iCloud Drive 下,插件 DSH_HOME 在 vault 内,dsh 首次运行会在那里
+自举整棵 node_modules(macOS 上是 400+ 软链,Windows 无开发者模式时是**数万实体文件**),
+iCloud 把它们排进同步队列 → 同步卡死。
+
+**现在的位置**:
+- `generated/`(persona、stream-relay、skill-dirs 补丁)= **仍在 vault 内**,小而可读、应随 vault 走
+- **DSH_HOME = `~/.dsh/deepharness/<vaultKey>`**(vault 绝对路径的 sha256 前 16 位;同 vault 稳定)
+- `history.json` 跟着 DSH_HOME 走,所以它也在系统目录里;vault 内**不再有** `dsh-home/`
+
+**迁移**:老用户第一次跑任务时自动迁移(只拷 `history.json` / `settings.yaml` /
+`.anonymous-user-id` / `sessions/` / `skills/`);`profiles/` 故意不拷(是缓存,dsh 会重建);
+旧目录**只拷不删**(回滚路径,失败则回退到它并给提示);`.migrated` 标记防止二次覆盖。
+
+**留下的护栏**:`prepareRun()` 会断言 DSH_HOME 不在 vault 内并上报。**别把 DSH_HOME 挪回 vault。**
+
+⚠️ **教训(写代码时最容易再犯)**:凡是"路径可能在插件生命周期中途变化"的地方,都要
+**现解析而不是在构造时捕获**。`HistoryStore` 就踩过:它在 `onload()` 建好、早于第一次任务
+触发的迁移,于是迁移后整场对话仍写旧目录、新位置静默停更(`a3b2383` 修)。同类盲区还有
+用户在设置里改 `dshHome`。
 
 ## 交接机制
 
 - 当前任务与进度:`HANDOFF.md`(任务清单勾选 + 每轮刷新「当前状态」一节)。
+- **本轮起工作流**:每完成一小步 → 跑四项验证(`npm test` / `tsc` / `build` / `eslint "src/**/*.ts"`)→
+  用 `bash deploy.sh <vault>` 部署到真实 vault → **交用户真人实测**。真人测试是发现静默失败的唯一手段:
+  2026-09-11 一天内,四个真 bug(面板点击无反应、恢复会话丢上下文、设置页快照、迁移后历史写错位置)
+  **全部由真人测试发现**,而当时自动化测试 289 条全绿。
 - 每轮对话结束,把「交接摘要」(≤10 条:改了什么/当前状态/下一步)追加到
   本地 `MAINTENANCE.md` 顶部。
 - 下次新对话:读本文件 + HANDOFF.md「当前状态」+ 审查报告路线图即可继续。
