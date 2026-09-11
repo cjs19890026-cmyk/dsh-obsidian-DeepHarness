@@ -10,8 +10,12 @@ import { setLocale, resolveLocale, getLocale, t } from './i18n';
 export default class DshPlugin extends Plugin {
   settings!: DshSettings;
   private commandsRegistered = false;
-  /** P2-K: open chat views. Obsidian may skip onClose() on unload, so the
-   *  plugin tears each view down explicitly (see onunload). */
+  /** P2-K: every open chat view, purely so unload can tear each one down
+   *  (Obsidian may skip onClose() on unload). This is *not* a multi-panel
+   *  feature: the plugin treats the chat as one panel — the ribbon, the
+   *  commands and "ask current note" always target the one revealed by
+   *  activateChatView(). A user can still open more views by hand; those are
+   *  independent views, not command targets (review D-4). */
   private chatViews = new Set<ChatView>();
   history: HistoryStore | null = null;
   private settingsChangeListeners = new Set<() => void>();
@@ -175,8 +179,9 @@ export default class DshPlugin extends Plugin {
       title: file.basename,
       content: content.slice(0, 20000),
     });
-    await this.activateChatView();
-    const view = this.getChatView();
+    // The single chat panel: the commands write into the view this call just
+    // brought on screen, never into "whichever leaf happens to be first".
+    const view = await this.activateChatView();
     if (view) {
       view.setPendingInput(prompt);
     } else {
@@ -184,12 +189,11 @@ export default class DshPlugin extends Plugin {
     }
   }
 
-  private getChatView(): ChatView | null {
-    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_CHAT);
-    return leaves.length > 0 ? (leaves[0].view as ChatView) : null;
-  }
-
-  async activateChatView(): Promise<void> {
+  /**
+   * Reveal the chat panel and return it: what the ribbon icon, the command
+   * palette and the "ask current note" command all target.
+   */
+  async activateChatView(): Promise<ChatView | null> {
     const { workspace } = this.app;
     // The chat view lives in the right sidebar; if that sidebar is collapsed
     // the leaf is created/focused but invisible. Expanding it here makes the
@@ -207,9 +211,13 @@ export default class DshPlugin extends Plugin {
     }
     if (leaf) {
       workspace.setActiveLeaf(leaf, { focus: true });
+      // Already narrowed to ChatView when the leaf came from getLeavesOfType.
+      // (A freshly created view may be Obsidian's deferred placeholder, so this
+      // deliberately does not re-test the instance here.)
+      return leaf.view as ChatView;
     }
+    return null;
   }
-
   async loadSettings(): Promise<void> {
     // P1-5: data-file settings are untrusted. Option-backed fields (model /
     // reasoningEffort / permissionMode / toolExecutionMode / provider) fall
