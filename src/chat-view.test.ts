@@ -201,3 +201,88 @@ describe('ChatView conversation context', () => {
     expect(task).toContain('SECOND_LINE_MARKER');
   });
 });
+
+describe('ChatView.prepareRun (extracted preparation phase)', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    appSlot.current = undefined;
+  });
+
+  /** A view whose runner reports whatever the test wants it to find. */
+  function viewWithProbes(probes: { bin?: string | null; node?: string | null; script?: string | null }) {
+    const view = buildView();
+    const runner = (view as unknown as { runner: Record<string, unknown> }).runner;
+    runner.detectBin = async () => probes.bin ?? null;
+    runner.detectNode = async () => probes.node ?? null;
+    runner.resolveDshScript = () => probes.script ?? null;
+    return view;
+  }
+
+  it('reports a missing dsh binary instead of spawning', async () => {
+    const view = viewWithProbes({ bin: null });
+    await view.onOpen();
+    let spawned = false;
+    (view as unknown as { client: { run(): Promise<unknown> } }).client.run = async () => {
+      spawned = true;
+      return { exitCode: 0, stdout: '', stderr: '', durationMs: 0, killReason: null };
+    };
+
+    const prep = await (view as unknown as {
+      prepareRun(m: string): Promise<{ ok: boolean }>;
+    }).prepareRun('hello');
+
+    expect(prep.ok).toBe(false);
+    expect(spawned).toBe(false);
+    // The original code rendered a setup error and announced it; both stay.
+    expect(view.containerEl.querySelector('.dsh-message-system')).toBeTruthy();
+  });
+
+  it('reports a missing node binary instead of spawning', async () => {
+    const view = viewWithProbes({ bin: '/usr/bin/dsh', node: null });
+    await view.onOpen();
+    const prep = await (view as unknown as {
+      prepareRun(m: string): Promise<{ ok: boolean }>;
+    }).prepareRun('hello');
+    expect(prep.ok).toBe(false);
+    expect(view.containerEl.querySelector('.dsh-message-system')).toBeTruthy();
+  });
+
+  it('returns everything a run needs when the environment is complete', async () => {
+    const view = viewWithProbes({
+      bin: '/usr/local/bin/dsh',
+      node: process.execPath,
+      script: '/usr/local/lib/dsh/bin.js',
+    });
+    await view.onOpen();
+    const prep = await (view as unknown as { prepareRun(m: string): Promise<Record<string, unknown>> })
+      .prepareRun('summarise my notes');
+
+    expect(prep.ok).toBe(true);
+    // The assembled task carries the user's message; the rest are the paths the
+    // spawn needs. Losing any of these was the failure mode this guards.
+    expect(prep.task).toContain('summarise my notes');
+    expect(prep.bin).toBe('/usr/local/bin/dsh');
+    expect(prep.nodeBin).toBe(process.execPath);
+    expect(prep.dshScript).toBe('/usr/local/lib/dsh/bin.js');
+    expect(typeof prep.dshHome).toBe('string');
+    expect(typeof prep.workdir).toBe('string');
+    expect(Array.isArray(prep.patchPaths)).toBe(true);
+    expect(Array.isArray(prep.issues)).toBe(true);
+  });
+
+  it('stops before preparing when the view was torn down mid-detection', async () => {
+    // P2-K: the four `closed` guards used to sit inline in sendMessage; this
+    // pins the one that fires between binary detection and the rest.
+    const view = viewWithProbes({ bin: '/usr/bin/dsh', node: process.execPath, script: '/x/bin.js' });
+    await view.onOpen();
+    const runner = (view as unknown as { runner: Record<string, unknown> }).runner;
+    runner.detectNode = async () => {
+      (view as unknown as { closed: boolean }).closed = true;
+      return process.execPath;
+    };
+
+    const prep = await (view as unknown as { prepareRun(m: string): Promise<{ ok: boolean }> })
+      .prepareRun('hello');
+    expect(prep.ok).toBe(false);
+  });
+});

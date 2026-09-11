@@ -15,7 +15,7 @@ import { ChipEditor } from './chip-editor';
 import { HistoryPanel } from './history-panel';
 import { SkillPanel } from './skill-panel';
 import { FloatingPanel } from './floating-panel';
-import { t } from './i18n';
+import { t, type TranslationKey } from './i18n';
 import { NoteCreatorModal } from './modals';
 
 export const VIEW_TYPE_CHAT = 'deepharness-chat';
@@ -459,35 +459,82 @@ export class ChatView extends ItemView {
     new Notice(t('chat.cleared'));
   }
 
-  private async sendMessage(): Promise<void> {
-    const message = this.editor.getText().trim();
-    if (!message || this.running) {
-      if (this.running) new Notice(t('chat.busy'));
-      return;
-    }
+  /**
+   * Everything that must be true before a dsh process may be spawned, in one
+   * place: locate the binary, node and dsh's real script; make sure the vault
+   * has its patch overlays, DSH_HOME, seeded skill and memory file; and collect
+   * whatever degraded along the way instead of failing silently.
+   *
+   * Extracted from sendMessage() (review C-1), which had this interleaved with
+   * streaming and result handling in a ~270-line method. Two concrete reasons
+   * beyond readability: the four `closed` guards that protect a torn-down view
+   * all live here now, and the phase-3 RunController needs this as an explicit
+   * step rather than a stretch of code to be untangled later.
+   *
+   * `ok: false` means "already reported to the user, do not start a run" — the
+   * setup error is rendered and announced here, exactly as before.
+   */
+  private async prepareRun(
+    message: string,
+  ): Promise<
+    | { ok: true; issues: PreparationIssue[]; bin: string; nodeBin: string; dshScript: string;
+        vaultRoot: string; task: string; dshHome: string; workdir: string; patchPaths: string[] }
+    | { ok: false }
+  > {
+    const fail = (title: TranslationKey, notice: TranslationKey): { ok: false } => {
+      this.renderSetupError(t(title), t(notice));
+      new Notice(t(notice), 6000);
+      return { ok: false };
+    };
 
     const bin = await this.runner.detectBin();
     // The view may be torn down while we await (close panel / plugin unload):
     // never continue into a dead view — no DOM writes, no spawn.
-    if (this.closed) return;
-    if (!bin) {
-      this.renderSetupError(t('chat.noDshTitle'), t('chat.noDsh'));
-      new Notice(t('chat.noDsh'), 6000);
-      return;
-    }
+    if (this.closed) return { ok: false };
+    if (!bin) return fail('chat.noDshTitle', 'chat.noDsh');
     // Detect node + dsh's real script so we spawn `node bin.js` directly
     // (bypasses the shebang, which fails under Electron's restricted PATH).
     const nodeBin = await this.runner.detectNode();
-    if (this.closed) return;
-    if (!nodeBin) {
-      this.renderSetupError(t('chat.noNodeTitle'), t('chat.noNode'));
-      new Notice(t('chat.noNode'), 6000);
-      return;
-    }
+    if (this.closed) return { ok: false };
+    if (!nodeBin) return fail('chat.noNodeTitle', 'chat.noNode');
     const dshScript = this.runner.resolveDshScript(bin);
-    if (!dshScript) {
-      this.renderSetupError(t('chat.dshNotNodeScriptTitle'), t('chat.dshNotNodeScript'));
-      new Notice(t('chat.dshNotNodeScript'), 6000);
+    if (!dshScript) return fail('chat.dshNotNodeScriptTitle', 'chat.dshNotNodeScript');
+
+    const vaultRoot = this.plugin.getVaultRoot();
+    const task = this.runner.buildTask(message, this.buildMemorySummary());
+    // Context meter: account for this turn's prompt (system persona +
+    // assembled task) right when it is sent.
+    if (this.contextMeter) {
+      this.contextMeter.addTokens(PERSONA_FIXED_TOKENS + estimateTokens(task));
+    }
+
+    // P1-3: preparation-step degradation (fallbacks / failed writes) is
+    // collected here and surfaced by the caller before the run starts.
+    const issues: PreparationIssue[] = [];
+    const patches = await this.runner.ensureVaultPatch(vaultRoot, issues);
+    if (this.closed) return { ok: false }; // torn down during patch prep
+    const skillDirsPatch = this.runner.ensureSkillDirsPatch(vaultRoot, issues);
+    const patchPaths = [patches.persona, patches.think, skillDirsPatch]
+      .filter((p): p is string => p !== null);
+    // Built-in obsidian skill + long-term memory seed.
+    this.runner.ensureObsidianSkill(vaultRoot, issues);
+    this.runner.ensureMemoryFile(vaultRoot, issues);
+    // Isolated DSH_HOME with the selected model + reasoning effort;
+    // falls back to the user home when it cannot be prepared.
+    const pluginHome = this.runner.ensurePluginDshHome(vaultRoot, {
+      model: this.plugin.settings.model,
+      effort: this.plugin.settings.reasoningEffort,
+    }, issues);
+    const dshHome = pluginHome ?? this.runner.dshHome();
+    const workdir = this.runner.workdir(vaultRoot, issues);
+
+    return { ok: true, issues, bin, nodeBin, dshScript, vaultRoot, task, dshHome, workdir, patchPaths };
+  }
+
+  private async sendMessage(): Promise<void> {
+    const message = this.editor.getText().trim();
+    if (!message || this.running) {
+      if (this.running) new Notice(t('chat.busy'));
       return;
     }
 
@@ -498,36 +545,13 @@ export class ChatView extends ItemView {
     this.abortController = new AbortController();
     this.setButtonToStop();
 
-    const vaultRoot = this.plugin.getVaultRoot();
-    const memorySummary = this.buildMemorySummary();
-    const task = this.runner.buildTask(message, memorySummary);
-    // Context meter: account for this turn's prompt (system persona +
-    // assembled task) right when it is sent.
-    if (this.contextMeter) {
-      this.contextMeter.addTokens(PERSONA_FIXED_TOKENS + estimateTokens(task));
-    }
-    // P1-3: preparation-step degradation (fallbacks / failed writes) is
-    // collected here and surfaced to the user before the run starts.
-    const prepIssues: PreparationIssue[] = [];
-    const patches = await this.runner.ensureVaultPatch(vaultRoot, prepIssues);
-    if (this.closed) return; // torn down during patch prep — do not start the run
-    const skillDirsPatch = this.runner.ensureSkillDirsPatch(vaultRoot, prepIssues);
-    const patchPaths = [patches.persona, patches.think, skillDirsPatch].filter((p): p is string => p !== null);
-    // Built-in obsidian skill + long-term memory seed.
-    this.runner.ensureObsidianSkill(vaultRoot, prepIssues);
-    this.runner.ensureMemoryFile(vaultRoot, prepIssues);
-    // Isolated DSH_HOME with the selected model + reasoning effort;
-    // falls back to the user home when it cannot be prepared.
-    const pluginHome = this.runner.ensurePluginDshHome(vaultRoot, {
-      model: this.plugin.settings.model,
-      effort: this.plugin.settings.reasoningEffort,
-    }, prepIssues);
-    const dshHome = pluginHome ?? this.runner.dshHome();
-    const workdir = this.runner.workdir(vaultRoot, prepIssues);
+    const prep = await this.prepareRun(message);
+    if (!prep.ok) return;
+    const { bin, nodeBin, dshScript, vaultRoot, task, dshHome, workdir, patchPaths } = prep;
     // P1-3: preparation degraded (DSH_HOME fallback, patch / skill / memory
     // write failures, workdir fallback…) — surface it once instead of running
     // degraded silently.
-    if (prepIssues.length > 0) this.renderPreparationIssues(prepIssues);
+    if (prep.issues.length > 0) this.renderPreparationIssues(prep.issues);
 
     // Streaming assistant message: thinking + tools stream inline into the
     // message (web-UI style, no wrapper container), then the answer renders
