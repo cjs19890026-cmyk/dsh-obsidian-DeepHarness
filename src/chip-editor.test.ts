@@ -1,37 +1,14 @@
 // @vitest-environment jsdom
 /**
- * Regression tests for the chip editor. Polyfills the minimal Obsidian DOM
- * helpers (createDiv / createSpan / empty / toggleClass) that chip-editor
- * uses; jsdom's Selection is a stub, so caret placement is not asserted here.
+ * Regression tests for the chip editor: [[path]] memo chips inside the
+ * contenteditable input, and the serialization contract it must keep
+ * (see the header comment in chip-editor.ts).
+ *
+ * The Obsidian DOM helpers this file used to polyfill by hand now come from
+ * the shared src/test-setup.ts (review E-1); jsdom's Selection is a stub, so
+ * caret placement is still not asserted here.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-
-const makeEl = (tag: string, opts?: { cls?: string; text?: string }): HTMLElement => {
-  const el = document.createElement(tag);
-  if (opts?.cls) el.className = opts.cls;
-  if (opts?.text) el.textContent = opts.text;
-  return el;
-};
-const appendTo = (self: HTMLElement, opts?: { cls?: string; text?: string }): HTMLElement => {
-  const el = makeEl(self.tagName.toLowerCase() === 'span' ? 'span' : 'div', opts);
-  self.appendChild(el);
-  return el;
-};
-
-(HTMLElement.prototype as unknown as Record<string, unknown>).empty = function (this: HTMLElement): void {
-  this.innerHTML = '';
-};
-(HTMLElement.prototype as unknown as Record<string, unknown>).toggleClass = function (this: HTMLElement, cls: string, on: boolean): void {
-  this.classList.toggle(cls, on);
-};
-(HTMLElement.prototype as unknown as Record<string, unknown>).createDiv = function (this: HTMLElement, opts?: { cls?: string; text?: string }): HTMLElement {
-  return appendTo(this, opts);
-};
-(HTMLElement.prototype as unknown as Record<string, unknown>).createSpan = function (this: HTMLElement, opts?: { cls?: string; text?: string }): HTMLElement {
-  return appendTo(this, opts);
-};
-(globalThis as Record<string, unknown>).createDiv = (opts?: { cls?: string; text?: string }): HTMLElement => makeEl('div', opts);
-(globalThis as Record<string, unknown>).createSpan = (opts?: { cls?: string; text?: string }): HTMLElement => makeEl('span', opts);
 
 import { ChipEditor } from './chip-editor';
 
