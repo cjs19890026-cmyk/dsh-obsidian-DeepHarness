@@ -1,21 +1,21 @@
 import * as path from 'path';
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, setIcon, Menu, MarkdownView, Keymap } from 'obsidian';
-import type DshPlugin from './main';
-import { DshClient, type DshRunResult } from './dsh-client';
-import { DshRunner, type PreparationIssue } from './dsh-runner';
-import { buildTitleEntries, linkifyNoteTitles, type NoteInfo, type NoteTitleEntry } from './linkify';
-import { scanSkillRoots, type SkillEntry, type ScanRoot } from './skills';
+import type DshPlugin from '../main';
+import { DshClient, type DshRunResult } from '../dsh/dsh-client';
+import { DshRunner, type PreparationIssue } from '../dsh/dsh-runner';
+import { buildTitleEntries, linkifyNoteTitles, type NoteInfo, type NoteTitleEntry } from '../core/linkify';
+import { scanSkillRoots, type SkillEntry, type ScanRoot } from '../core/skills';
 import { SkillSuggest } from './skill-suggest';
-import { REASONING_OPTIONS, PERMISSION_OPTIONS, modelDisplayLabel, modelOptionsWithCurrent, permissionLabel, type PermissionMode } from './settings';
-import { ContextMeter, estimateTokens } from './context-meter';
-import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir, frontmatterAliases, partialTurnAnswer } from './pure';
-import { HistoryTool } from './history';
+import { REASONING_OPTIONS, PERMISSION_OPTIONS, modelDisplayLabel, modelOptionsWithCurrent, permissionLabel, type PermissionMode } from '../settings/index';
+import { ContextMeter, estimateTokens } from '../core/context-meter';
+import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir, frontmatterAliases, partialTurnAnswer } from '../dsh/pure';
+import { HistoryTool } from '../core/history';
 import { MentionSuggest } from './mention';
 import { ChipEditor } from './chip-editor';
 import { HistoryPanel } from './history-panel';
 import { SkillPanel } from './skill-panel';
 import { FloatingPanel } from './floating-panel';
-import { t, type TranslationKey } from './i18n';
+import { t, type TranslationKey } from '../i18n/index';
 import { NoteCreatorModal } from './modals';
 
 export const VIEW_TYPE_CHAT = 'deepharness-chat';
@@ -1166,7 +1166,7 @@ export class ChatView extends ItemView {
   /** Resume an archived session: re-activate it so new turns append back, and
    *  rebuild the context the agent needs to continue it. Public for
    *  HistoryPanel: clicking a session row resumes it. */
-  async resumeSession(s: import('./history').SessionRecord): Promise<void> {
+  async resumeSession(s: import('../core/history').SessionRecord): Promise<void> {
     const activated = await this.plugin.history?.activateSession(s.id);
     if (!activated) {
       new Notice(t('chat.resumeFail'));

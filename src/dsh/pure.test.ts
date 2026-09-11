@@ -14,7 +14,7 @@ import {
   frontmatterAliases,
   partialTurnAnswer,
 } from './pure';
-import { estimateTokens } from './context-meter';
+import { estimateTokens } from '../core/context-meter';
 import { PLUGIN_ID, pluginPaths } from './paths';
 
 describe('estimateTokens', () => {

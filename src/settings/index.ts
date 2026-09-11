@@ -1,10 +1,10 @@
 import { App, Notice, Platform, PluginSettingTab, Setting, requestUrl, type DropdownComponent, type SettingDefinitionItem, type SettingDefinitionRender, type TextComponent } from 'obsidian';
 import type DshPlugin from '../main';
-import { t, type TranslationKey } from '../i18n';
-import { DshRunner } from '../dsh-runner';
-import { pluginPaths } from '../paths';
-import { DiagnosticPromptModal, FolderSuggestModal } from '../modals';
-import { comparePluginVersion, fetchLatestRelease, type PluginUpdateStatus } from '../updates';
+import { t, type TranslationKey } from '../i18n/index';
+import { DshRunner } from '../dsh/dsh-runner';
+import { pluginPaths } from '../dsh/paths';
+import { DiagnosticPromptModal, FolderSuggestModal } from '../views/modals';
+import { comparePluginVersion, fetchLatestRelease, type PluginUpdateStatus } from '../core/updates';
 import {
   buildCheckOutcomes,
   buildRepairPrompt,
@@ -15,7 +15,7 @@ import {
   hasFailures,
   type CheckOutcome,
   type WriteProbe,
-} from '../diagnostics';
+} from '../core/diagnostics';
 import {
   DEFAULT_SETTINGS,
   MODEL_OPTIONS,
@@ -37,9 +37,9 @@ import {
   modelOptionsWithCurrent,
   normalizeStoredSettings,
 } from './validate';
-import { isSafeModelId } from '../dsh-config';
+import { isSafeModelId } from '../dsh/dsh-config';
 // The page uses the validation helpers, and these re-exports also keep
-// `import … from './settings'` working for every existing caller after the
+// `import … from './index'` working for every existing caller after the
 // C-2 split — `export *` re-exports the names into this module's scope too.
 export * from './types';
 export * from './validate';
@@ -49,7 +49,7 @@ export * from './validate';
  *
  * Split out of settings.ts (review C-2). The data shape is `./types` and the
  * validation rules are `./validate`; both are re-exported below so
- * `import … from './settings'` keeps working for every existing caller.
+ * `import … from './index'` keeps working for every existing caller.
  */
 
 export class DshSettingTab extends PluginSettingTab {

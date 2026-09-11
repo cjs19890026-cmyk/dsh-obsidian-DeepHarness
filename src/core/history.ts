@@ -1,7 +1,7 @@
 import { App, Notice } from 'obsidian';
 import * as fs from 'fs';
 import * as path from 'path';
-import { t } from './i18n';
+import { t } from '../i18n/index';
 
 /**
  * Session-based history: completed conversations are archived as session

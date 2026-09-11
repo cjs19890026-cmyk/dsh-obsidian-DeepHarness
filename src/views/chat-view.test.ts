@@ -19,7 +19,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('obsidian', async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
-  const doubles = await import('../test/obsidian-view-double');
+  const doubles = await import('../../test/obsidian-view-double');
   return {
     ...actual,
     ItemView: doubles.FakeItemView,
@@ -31,7 +31,7 @@ vi.mock('obsidian', async (importOriginal) => {
 });
 
 import { ChatView } from './chat-view';
-import { appSlot, makeAppDouble, makePluginDouble } from '../test/obsidian-view-double';
+import { appSlot, makeAppDouble, makePluginDouble } from '../../test/obsidian-view-double';
 
 function buildView(): ChatView {
   const app = makeAppDouble();

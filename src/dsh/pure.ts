@@ -4,7 +4,7 @@
  */
 import * as path from 'path';
 import { pathToFileURL } from 'url';
-import { t } from './i18n';
+import { t } from '../i18n/index';
 
 /**
  * Render the stream-relay patch overlay (`stream.yml`) for a relay script.

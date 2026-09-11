@@ -1,4 +1,4 @@
-import { isSafeModelId, isSafeProviderId } from '../dsh-config';
+import { isSafeModelId, isSafeProviderId } from '../dsh/dsh-config';
 import {
   DEFAULT_SETTINGS,
   MODEL_OPTIONS,

@@ -12,7 +12,7 @@
  * real one would drag the Obsidian runtime into every unit test that only
  * wants to exercise the version comparison.
  */
-import { versionCmp } from './pure';
+import { versionCmp } from '../dsh/pure';
 
 /**
  * GitHub's "latest release" endpoint for this plugin's repo.

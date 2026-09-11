@@ -15,7 +15,7 @@
  * / token loss.
  */
 import { App, TFile, setIcon } from 'obsidian';
-import { t } from './i18n';
+import { t } from '../i18n/index';
 import type { SuggestHost } from './chip-editor';
 
 /** Cap on how many matches are rendered at once. */

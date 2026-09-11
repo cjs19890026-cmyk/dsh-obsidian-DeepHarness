@@ -5,9 +5,9 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { versionCmp, streamRelayPatchYaml, shimJsTarget, resolveVaultRelativeDir } from './pure';
 import { buildDshEnv, type DshDiagnostics } from './dsh-client';
-import type { DshSettings } from './settings';
-import { ensureObsidianSkill as writeObsidianSkill, MEMORY_FILE } from './obsidian-skill';
-import { t, getLocale } from './i18n';
+import type { DshSettings } from '../settings/index';
+import { ensureObsidianSkill as writeObsidianSkill, MEMORY_FILE } from '../core/obsidian-skill';
+import { t, getLocale } from '../i18n/index';
 import { extractTopLevelBlock, readDshSettings, type DshConfigSnapshot } from './dsh-config';
 import { pluginPaths } from './paths';
 

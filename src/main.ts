@@ -1,11 +1,11 @@
 import { Plugin, WorkspaceLeaf, Notice } from 'obsidian';
-import { DshSettings, DshSettingTab, normalizeStoredSettings, obsidianLocale, type OptionFieldKey, type PermissionMode } from './settings';
-import { ChatView, VIEW_TYPE_CHAT } from './chat-view';
-import { SecurityConfirmModal } from './modals';
-import { DshClient } from './dsh-client';
-import { HistoryStore } from './history';
-import { pluginPaths } from './paths';
-import { setLocale, resolveLocale, getLocale, t } from './i18n';
+import { DshSettings, DshSettingTab, normalizeStoredSettings, obsidianLocale, type OptionFieldKey, type PermissionMode } from './settings/index';
+import { ChatView, VIEW_TYPE_CHAT } from './views/chat-view';
+import { SecurityConfirmModal } from './views/modals';
+import { DshClient } from './dsh/dsh-client';
+import { HistoryStore } from './core/history';
+import { pluginPaths } from './dsh/paths';
+import { setLocale, resolveLocale, getLocale, t } from './i18n/index';
 
 export default class DshPlugin extends Plugin {
   settings!: DshSettings;

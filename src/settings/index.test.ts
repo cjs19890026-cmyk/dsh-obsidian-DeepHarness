@@ -28,9 +28,9 @@ import {
   PROVIDER_OPTIONS,
   REASONING_OPTIONS,
   TOOL_EXECUTION_MODES,
-} from './settings';
-import { MODEL_CONTEXT_WINDOWS } from './pure';
-import { setLocale } from './i18n';
+} from './index';
+import { MODEL_CONTEXT_WINDOWS } from '../dsh/pure';
+import { setLocale } from '../i18n/index';
 
 const optionIds = {
   provider: PROVIDER_OPTIONS.map((o) => o.id),

@@ -1,5 +1,5 @@
 import { Modal, App, Setting, Notice, FuzzySuggestModal, TFolder } from 'obsidian';
-import { t } from './i18n';
+import { t } from '../i18n/index';
 
 /** Simplified "save as note" modal (pattern borrowed from claudian). */
 export class NoteCreatorModal extends Modal {

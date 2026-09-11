@@ -1,7 +1,7 @@
 import { setIcon } from 'obsidian';
-import { t } from './i18n';
+import { t } from '../i18n/index';
 import { FloatingPanel } from './floating-panel';
-import type { SessionRecord } from './history';
+import type { SessionRecord } from '../core/history';
 import type { ChatView } from './chat-view';
 
 /**

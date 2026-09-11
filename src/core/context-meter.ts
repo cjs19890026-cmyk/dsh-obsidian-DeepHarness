@@ -9,7 +9,7 @@
  * other chars ≈ 1 token / 4 chars. A Phase-2 streaming relay can replace
  * the estimate with real usage without touching this UI.
  */
-import { t } from './i18n';
+import { t } from '../i18n/index';
 
 /** Rough token estimate for a text blob (mixed CJK / Latin). */
 export function estimateTokens(text: string): number {

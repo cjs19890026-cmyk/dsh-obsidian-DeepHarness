@@ -14,36 +14,55 @@
 ## 项目结构
 
 ```
-src/main.ts          插件入口:视图注册、ribbon、命令、设置加载、vault 根目录、P2-K 多视图注册表
-src/chat-view.ts     聊天 UI:流式渲染、思考/工具块、历史面板、技能面板、会话恢复、降级提示(大文件,待拆)
-src/chip-editor.ts   富文本输入框(contenteditable):[[路径]] 渲染为可点击 chip,序列化契约见文件头;兼作 @/ / 补全的 SuggestHost
-src/dsh-client.ts    子进程桥:spawn node <dsh>/bin.js --profile headless,超时/取消(killReason)、env 白名单、依赖注入
-src/dsh-runner.ts    二进制/Node 探测、--patch 覆盖层生成(persona + stream-relay)、隔离 DSH_HOME、降级收集(大文件,待拆)
-src/dsh-config.ts    窄口径读取用户 ~/.dsh/settings.yaml(模型目录 + provider 路由);isSafeModelId/isSafeProviderId(YAML 注入防线)
-src/obsidian-skill.ts  内置 obsidian DSH skill(SKILL.md + references/cli.md + conventions.md)及写入
-src/history.ts       会话历史:原子落盘、置顶/重命名/备注/恢复
-src/context-meter.ts 上下文用量环(按模型各自的上下文窗口估算)
-src/mention.ts       @ 提及:输入框 @ 弹 vault 笔记列表,选中生成 [[wikilink]]
-src/skill-suggest.ts / 斜杠技能补全
-src/modals.ts        独立 Modal 组件(NoteCreator / SecurityConfirm / DiagnosticPrompt / FolderSuggest 等,自 chat-view 抽出)
-src/linkify.ts       回答自动出链:笔记标题/别名/路径 → [[wikilink]](纯函数,可单测)
-src/skills.ts        技能目录扫描(纯函数 + node fs):解析 SKILL.md frontmatter、kebab-case 校验、按源优先级去重
-src/pure.ts          无 Obsidian 依赖的纯函数(parseHeadlessOutput / parseDshEventLine / resolveVaultRelativeDir 等)
-src/settings.ts      设置类型 + 校验(normalizeStoredSettings)+ 设置页 UI(大文件,待拆)
-src/diagnostics.ts   环境检查报告与修复请求文本生成(Obsidian-free,可单测)
-src/updates.ts       插件更新检查(GitHub release 比对,Obsidian-free,可单测)
-src/i18n/index.ts    en/zh 双语,TranslationKey 类型约束
-src/*.test.ts        vitest 单测(12 个测试文件,236 passed / 2 skipped)
-styles.css           全部样式(类前缀 dsh-)
-esbuild.config.mjs   构建脚本(production 压缩)
+src/main.ts              插件入口:视图注册、ribbon、命令、设置加载、vault 根目录、P2-K 视图注册表
+
+src/views/               界面层(Obsidian 相关)
+  chat-view.ts           聊天 UI:流式渲染、思考/工具块、会话恢复、降级提示(1248 行,后续可再拆)
+  floating-panel.ts      浮动面板基类:锚点定位、外点关闭、Escape、互斥(两面板共用)
+  history-panel.ts       会话历史面板(行渲染 + 重命名/置顶/删除/备注/恢复)
+  skill-panel.ts         技能面板(复用 view 的缓存扫描)
+  chip-editor.ts         富文本输入框(contenteditable):[[路径]] 渲染为可点击 chip,序列化契约见文件头;兼作 @/ / 补全的 SuggestHost
+  mention.ts             @ 提及:输入框 @ 弹 vault 笔记列表,选中生成 [[wikilink]]
+  skill-suggest.ts       / 斜杠技能补全
+  modals.ts              独立 Modal 组件(NoteCreator / SecurityConfirm / DiagnosticPrompt / FolderSuggest 等)
+
+src/dsh/                 与 DSH 运行时打交道的层
+  dsh-client.ts          子进程桥:spawn node <dsh>/bin.js --profile headless,超时/取消(killReason)、env 白名单、依赖注入
+  dsh-runner.ts          二进制/Node 探测、--patch 覆盖层生成(persona + stream-relay)、隔离 DSH_HOME、降级收集(862 行,后续可再拆)
+  dsh-config.ts          窄口径读取用户 ~/.dsh/settings.yaml(模型目录 + provider 路由);isSafeModelId/isSafeProviderId(YAML 注入防线)
+  paths.ts               插件磁盘布局的唯一取址处(generated/ 与 dsh-home/)——dsh-home 迁出 vault 的前置
+  pure.ts                无 Obsidian 依赖的纯函数(parseHeadlessOutput / parseDshEventLine / resolveVaultRelativeDir 等)
+
+src/core/                领域服务与基础设施
+  history.ts             会话历史:原子落盘、置顶/重命名/备注/恢复
+  skills.ts              技能目录扫描(纯函数 + node fs):解析 SKILL.md frontmatter、kebab-case 校验、按源优先级去重
+  obsidian-skill.ts      内置 obsidian DSH skill(SKILL.md + references/cli.md + conventions.md)及写入
+  context-meter.ts       上下文用量环(按模型各自的上下文窗口估算)
+  linkify.ts             回答自动出链:笔记标题/别名/路径 → [[wikilink]](纯函数,可单测)
+  diagnostics.ts         环境检查报告与修复请求文本 + 可写性探测(Obsidian-free,可单测)
+  updates.ts             插件更新检查(GitHub release 比对,Obsidian-free,可单测)
+
+src/settings/            设置
+  index.ts               设置页 UI(1.13 声明式 API)+ 向后兼容 re-export
+  types.ts               设置数据结构与选项表(无 Obsidian 依赖、无 I/O)
+  validate.ts            读取/校验/修复存储值(纯逻辑,可单测)
+
+src/i18n/index.ts        en/zh 双语,TranslationKey 类型约束
+test/setup.ts            vitest 共享 Obsidian DOM polyfill(Node 环境 no-op)
+test/obsidian-stub.ts    让 import 'obsidian' 的模块在测试里可解析(包是纯类型)
+test/obsidian-view-double.ts  视图测试用的 ItemView / app / plugin 替身
+src/**/*.test.ts         vitest 单测(14 个测试文件,274 passed / 2 skipped)
+styles.css               全部样式(类前缀 dsh-)
+esbuild.config.mjs       构建脚本(production 压缩)
+vitest.config.ts         测试配置(node 环境 + 共享 setup + obsidian alias)
 .github/workflows/release.yml  官方 Actions 发布流:推 tag → 校验版本 → 构建 → attestation → 草稿 Release
 .github/workflows/ci.yml       普通分支 test + build
-deploy.sh            构建 + 部署到指定 vault
+deploy.sh                构建 + 部署到指定 vault
 README.md / readme-ch.md  英文 / 中文双语文档(顶部互链)
 docs/publish-checklist.md  发布到社区市场的检查清单与 PR 模板
 docs/architecture-review-2026-09-11.md  架构审查报告:后续任务的唯一来源(问题清单 + 四阶段路线图)
-HANDOFF.md           交接文档:红线、设计约定、任务清单与验收标准
-MAINTENANCE.md       本地维护日志(被 .gitignore 忽略,不上线)
+HANDOFF.md               交接文档:红线、设计约定、任务清单与验收标准
+MAINTENANCE.md           本地维护日志(被 .gitignore 忽略,不上线)
 ```
 
 ## 技术栈
@@ -71,13 +90,16 @@ MAINTENANCE.md       本地维护日志(被 .gitignore 忽略,不上线)
 8. **i18n**:所有用户可见文案必须走 `t()`;新增 key 必须 en + zh 同时加
 9. **历史持久化**:原子写(tmp + rename)+ 同步写(`onunload` 是 void,Obsidian 不 await)
 10. **显示名 DeepHarness**,插件 id / 文件夹名 `deepharness` 永远不变(路径依赖)
+11. **dsh 是无状态子进程**:每轮只看到 `buildTask` 组装的文本 + persona + `Harness/memory.md`。会话内上下文**只能**靠 `MEMORY_CONTEXT`(chat-view)那份记忆传递,`history.json` 里的完整轮次 agent 是读不到的——新增上下文来源请复用它,别另起一套截断
+12. **设置页不要捕获 `settings` 快照**:`loadSettings()` 会整体替换 `plugin.settings`,渲染回调必须现取 `this.plugin.settings`(写进旧对象 = 改了没人读的东西,且不报错)
+13. **插件磁盘路径只能从 `src/dsh/paths.ts` 取**(`generated/`、`dsh-home/`),不要再内联拼字符串
 
 ## 常见命令
 
 ```bash
 npm run build            # production 构建 → dist/
 npm run dev              # 开发构建(不压缩,inline sourcemap)
-npm test                 # vitest 单元测试(src/*.test.ts,12 个文件)
+npm test                 # vitest 单元测试(src/**/*.test.ts,14 个文件)
 npx tsc --noEmit         # 类型检查
 ./deploy.sh <vault路径>   # 构建 + 复制到 vault 插件目录
 # 部署后必须:设置 → 第三方插件 → 禁用再启用该插件(或 Cmd+Q 完全退出 Obsidian)

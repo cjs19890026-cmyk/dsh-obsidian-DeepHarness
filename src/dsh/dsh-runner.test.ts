@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { DshRunner, diagnosticProbe, type PreparationIssue } from './dsh-runner';
 import { DSH_ENV_ALLOWLIST } from './dsh-client';
-import type { DshSettings } from './settings';
+import type { DshSettings } from '../settings/index';
 
 /**
  * extraSkillDirs containment at the DSH patch level: ensureSkillDirsPatch

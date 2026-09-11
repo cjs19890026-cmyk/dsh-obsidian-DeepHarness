@@ -8,8 +8,8 @@
  * <skill_content> for that run, so the plugin only has to insert text.
  */
 import { App, setIcon } from 'obsidian';
-import { t } from './i18n';
-import { filterSkillEntries, SkillEntry } from './skills';
+import { t } from '../i18n/index';
+import { filterSkillEntries, SkillEntry } from '../core/skills';
 import type { SuggestHost } from './chip-editor';
 
 /** Cap on how many matches are rendered at once. */

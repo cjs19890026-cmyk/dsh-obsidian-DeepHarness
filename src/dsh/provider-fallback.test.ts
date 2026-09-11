@@ -14,7 +14,7 @@ vi.mock('obsidian', () => ({
   TFolder: class {},
 }));
 
-import { MODEL_OPTIONS } from './settings';
+import { MODEL_OPTIONS } from '../settings/index';
 import { OPENCODE_GO_PROVIDER_FALLBACK } from './dsh-runner';
 
 /**

@@ -12,7 +12,7 @@ vi.mock('obsidian', () => ({
 }));
 
 import { HistoryStore } from './history';
-import { t } from './i18n';
+import { t } from '../i18n/index';
 import type { HistoryTurn, SessionRecord } from './history';
 
 const HISTORY_FILE = 'history.json';

@@ -1,4 +1,4 @@
-import { t } from './i18n';
+import { t } from '../i18n/index';
 import { FloatingPanel } from './floating-panel';
 import type { ChatView } from './chat-view';
 
