@@ -125,7 +125,10 @@ export class DiagnosticPromptModal extends Modal {
   onOpen(): void {
     const { contentEl } = this;
     contentEl.empty();
-    contentEl.addClass('dsh-prompt-modal');
+    // Widen the modal *frame*. Putting the width on contentEl instead made the
+    // content box wider than its frame, so the tail of every long line was
+    // clipped behind the modal border.
+    this.modalEl.addClass('dsh-prompt-modal');
     contentEl.createEl('h3', { text: t('settings.check.copyTitle') });
     contentEl.createEl('p', { text: t('settings.check.copyDesc') });
 

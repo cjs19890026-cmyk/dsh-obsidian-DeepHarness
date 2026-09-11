@@ -417,7 +417,7 @@ export class ChatView extends ItemView {
     // never continue into a dead view — no DOM writes, no spawn.
     if (this.closed) return;
     if (!bin) {
-      this.renderMessage('assistant', `> ⚠️ ${t('chat.noDsh')}`, true);
+      this.renderSetupError(t('chat.noDshTitle'), t('chat.noDsh'));
       new Notice(t('chat.noDsh'), 6000);
       return;
     }
@@ -426,13 +426,13 @@ export class ChatView extends ItemView {
     const nodeBin = await this.runner.detectNode();
     if (this.closed) return;
     if (!nodeBin) {
-      this.renderMessage('assistant', `> ⚠️ ${t('chat.noNode')}`, true);
+      this.renderSetupError(t('chat.noNodeTitle'), t('chat.noNode'));
       new Notice(t('chat.noNode'), 6000);
       return;
     }
     const dshScript = this.runner.resolveDshScript(bin);
     if (!dshScript) {
-      this.renderMessage('assistant', `> ⚠️ ${t('chat.dshNotNodeScript')}`, true);
+      this.renderSetupError(t('chat.dshNotNodeScriptTitle'), t('chat.dshNotNodeScript'));
       new Notice(t('chat.dshNotNodeScript'), 6000);
       return;
     }
@@ -711,9 +711,18 @@ export class ChatView extends ItemView {
    * still proceeds — but the user now sees that some capabilities are missing.
    */
   private renderPreparationIssues(issues: PreparationIssue[]): void {
-    const lines = issues.map((i) => `> - ${i.message}`);
-    this.renderMessage('assistant', [`> ⚠️ ${t('chat.degrade.title')}`, ...lines].join('\n'), true);
+    const el = this.messagesContainer.createDiv({ cls: 'dsh-message dsh-message-system' });
+    const row = el.createDiv({ cls: 'dsh-notice' });
+    const icon = row.createSpan({ cls: 'dsh-notice-icon' });
+    setIcon(icon, 'alert-triangle');
+    const body = row.createDiv({ cls: 'dsh-notice-body' });
+    body.createDiv({ text: t('chat.degrade.title'), cls: 'dsh-notice-title' });
+    // One line per issue, as list items rather than Markdown bullets: the
+    // messages are raw error text and must not be reinterpreted.
+    const list = body.createEl('ul', { cls: 'dsh-notice-list' });
+    for (const issue of issues) list.createEl('li', { text: issue.message });
     new Notice(t('chat.degrade.notice', { count: String(issues.length) }), 6000);
+    this.scrollToBottom();
   }
 
   private stopRun(): void {
@@ -789,6 +798,32 @@ export class ChatView extends ItemView {
     });
     el.createDiv({ cls: 'dsh-message-content' });
     return el;
+  }
+
+  /**
+   * Render a blocking setup error as plain DOM instead of Markdown.
+   *
+   * The previous version emitted `> ⚠️ <text>` through the Markdown renderer.
+   * That left the warning glyph at the mercy of emoji-font metrics — it is not
+   * sized by anything the plugin controls, and users reported it ballooning
+   * until it covered the message — while the container painted
+   * `--text-error` on top of `--background-modifier-error`, i.e. red on red,
+   * which is barely legible in dark mode.
+   *
+   * A real SVG icon in a fixed-size box cannot be scaled by a font, and the
+   * body text uses the normal foreground colour so it stays readable on the
+   * tinted background. The text is not Markdown, so nothing in it can be
+   * reinterpreted as a quote, list or emphasis either.
+   */
+  private renderSetupError(title: string, detail?: string): void {
+    const el = this.messagesContainer.createDiv({ cls: 'dsh-message dsh-message-system' });
+    const row = el.createDiv({ cls: 'dsh-notice' });
+    const icon = row.createSpan({ cls: 'dsh-notice-icon' });
+    setIcon(icon, 'alert-triangle');
+    const body = row.createDiv({ cls: 'dsh-notice-body' });
+    body.createDiv({ text: title, cls: 'dsh-notice-title' });
+    if (detail) body.createDiv({ text: detail, cls: 'dsh-notice-detail' });
+    this.scrollToBottom();
   }
 
   private renderMessage(

@@ -274,16 +274,67 @@
   background: var(--background-modifier-border-hover);
 }
 
+/* Blocking setup errors / degraded-setup reports.
+   Deliberately plain — no tinted panel. Two earlier versions were wrong in
+   opposite directions: --text-error on --background-modifier-error (red on
+   red, barely legible in dark mode), then a solid red panel that read as an
+   alarm for what is usually a recoverable setup problem. The error colour now
+   sits only on the icon and the title, over the normal message background, so
+   it matches every other inline error in the app. */
 .dsh-message.dsh-message-system {
-  background: var(--background-modifier-error);
-  color: var(--text-error);
-  border-color: var(--background-modifier-error-hover);
+  background: transparent;
+  color: var(--text-normal);
+  border: none;
 }
 
 .dsh-message.dsh-message-system .dsh-message-content {
   background: transparent;
-  color: var(--text-error);
+  color: var(--text-normal);
   border: none;
+}
+
+.dsh-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* Fixed box: an SVG icon cannot be resized by a font metric, so it can never
+   balloon and cover the message the way an emoji glyph could. */
+.dsh-notice-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 2px;
+  color: var(--text-error);
+}
+
+.dsh-notice-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.dsh-notice-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dsh-notice-title {
+  font-weight: var(--font-semibold);
+  color: var(--text-error);
+}
+
+.dsh-notice-detail {
+  margin-top: 2px;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.dsh-notice-list {
+  margin: 4px 0 0;
+  padding-inline-start: 18px;
+  color: var(--text-muted);
 }
 
 .dsh-message-actions {
@@ -926,16 +977,27 @@
 }
 
 /* ── Diagnostic report preview ──────────────────────────── */
-.dsh-prompt-modal {
-  width: min(720px, 90vw);
+
+/* Applied to the modal frame, not to `.modal-content`: a content box wider
+   than its frame just overflows, which hid the end of every report line
+   behind the modal's border. */
+.modal.dsh-prompt-modal {
+  width: min(760px, 92vw);
+  max-width: 92vw;
 }
 
-.dsh-prompt-preview {
+/* The report is full of long absolute paths. `white-space: pre` kept each on
+   one line, so everything past the right edge was unreachable — wrap instead,
+   and allow a break inside a path that has no spaces to break at. */
+.modal.dsh-prompt-modal .dsh-prompt-preview {
   width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
   resize: vertical;
   font-family: var(--font-monospace);
   font-size: var(--font-ui-smaller);
-  white-space: pre;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 /* Stacked variant of a settings row: description on top, the list and the

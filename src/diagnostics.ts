@@ -136,8 +136,6 @@ export function buildRepairPrompt(
   lines.push('');
   lines.push('## What I have already tried');
   lines.push('(add anything you tried here)');
-  lines.push('');
-  lines.push('No API keys are included in this report.');
 
   return lines.join('\n');
 }

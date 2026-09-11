@@ -109,14 +109,13 @@ describe('buildRepairPrompt', () => {
     expect(p).toContain('[ok] dsh');
   });
 
-  it('states that no credentials are included', () => {
-    expect(buildRepairPrompt(FAILING, CTX)).toContain('No API keys are included');
-  });
-
   it('cannot leak a credential: the context type has no field to carry one', () => {
     // Belt-and-braces tripwire. The real guarantee is that
     // `DiagnosticContext` has no key field, so there is nothing to serialise;
     // this catches a future edit that starts interpolating settings wholesale.
+    // It is a guard, not user-facing copy — the report deliberately says
+    // nothing about keys, because mentioning them invites the very suspicion
+    // it would be trying to dispel.
     const p = buildRepairPrompt(FAILING, CTX);
     expect(p.toLowerCase()).not.toContain('apikey');
     expect(p.toLowerCase()).not.toContain('api_key');

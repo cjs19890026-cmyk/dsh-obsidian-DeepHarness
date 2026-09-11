@@ -77,6 +77,8 @@ After enabling the plugin, click the bot icon in the left ribbon to open the cha
 - ⚙️ **Command**: "Process current note"
 - 🗂 **Generated vault persona** (`.obsidian/plugins/deepharness/generated/vault.yml`)
   instructs the agent to use wikilinks and ask before destructive operations; freely editable
+- 🩺 **Environment check + diagnostics**: reports `dsh`, Node.js and the three paths the plugin must write, and gives a concrete remedy for each failure (install command, which path to fix, or the usual sync-folder / permission causes). A failing check can produce a copyable report you can hand to any assistant to diagnose
+- 🔄 **Update check**: shows whether a newer release exists. The plugin never downloads or installs updates itself — that stays with Obsidian, so the store's review and signed releases are never bypassed
 - 🌐 **i18n UI** (English / 中文)
 
 ## Settings
@@ -93,6 +95,7 @@ After enabling the plugin, click the bot icon in the left ribbon to open the cha
 | Conversation memory | on | Context refill |
 | Tool execution mode | default (native) | native / code / both (tool backend, not a file sandbox) |
 | Model | `deepseek-flash` | Selected from the editable **Model list** below it; add any model id to use a model newer than this plugin release |
+| Model list | 4 built-in ids | The models offered in the dropdowns. Add or delete any id; **Import from DSH** appends the ids your own DSH settings declare, only when pressed |
 | Reasoning effort | high | off / high / max; switchable from the toolbar |
 | Security mode | workspace write | read-only / workspace write / full access |
 | Show thinking | on | Collapsible thinking block before the answer |
@@ -105,6 +108,7 @@ After enabling the plugin, click the bot icon in the left ribbon to open the cha
 - The agent's file tools are scoped to the vault; **however the bash tool runs with user-level permissions** (headless has no file sandbox by default), so the persona rules require the agent not to modify files outside the vault and to ask before destructive operations
 - Credentials go through existing DSH configuration by default (the plugin collects nothing); optionally you can set a plugin-only API key, which is stored in the local plugin data file and injected as an environment variable at run time — never shared with the desktop app
 - All child processes are terminated when the plugin unloads
+- The only request the plugin makes on its own behalf is the update check, and only when you press it: it asks the public GitHub releases API for this repository's latest version. No telemetry, and the diagnostic report contains no credentials
 
 ## Roadmap
 
