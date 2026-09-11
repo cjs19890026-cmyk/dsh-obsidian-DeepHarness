@@ -17,15 +17,12 @@ import {
   type WriteProbe,
 } from '../core/diagnostics';
 import {
-  DEFAULT_SETTINGS,
-  MODEL_OPTIONS,
   PERMISSION_OPTIONS,
   REASONING_OPTIONS,
   TOOL_EXECUTION_LABELS,
   TOOL_EXECUTION_MODES,
   permissionLabel,
   type DshSettings,
-  type OptionFieldKey,
   type PermissionMode,
   type ReasoningEffort,
   type ToolExecutionMode,
@@ -35,7 +32,6 @@ import {
   mergeModelIds,
   modelDisplayLabel,
   modelOptionsWithCurrent,
-  normalizeStoredSettings,
 } from './validate';
 import { isSafeModelId } from '../dsh/dsh-config';
 // The page uses the validation helpers, and these re-exports also keep

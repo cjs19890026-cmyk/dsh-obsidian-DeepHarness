@@ -14,7 +14,6 @@ import { MentionSuggest } from './mention';
 import { ChipEditor } from './chip-editor';
 import { HistoryPanel } from './history-panel';
 import { SkillPanel } from './skill-panel';
-import { FloatingPanel } from './floating-panel';
 import { t, type TranslationKey } from '../i18n/index';
 import { NoteCreatorModal } from './modals';
 
@@ -478,7 +477,7 @@ export class ChatView extends ItemView {
     message: string,
   ): Promise<
     | { ok: true; issues: PreparationIssue[]; bin: string; nodeBin: string; dshScript: string;
-        vaultRoot: string; task: string; dshHome: string; workdir: string; patchPaths: string[] }
+        task: string; dshHome: string; workdir: string; patchPaths: string[] }
     | { ok: false }
   > {
     const fail = (title: TranslationKey, notice: TranslationKey): { ok: false } => {
@@ -528,7 +527,7 @@ export class ChatView extends ItemView {
     const dshHome = pluginHome ?? this.runner.dshHome();
     const workdir = this.runner.workdir(vaultRoot, issues);
 
-    return { ok: true, issues, bin, nodeBin, dshScript, vaultRoot, task, dshHome, workdir, patchPaths };
+    return { ok: true, issues, bin, nodeBin, dshScript, task, dshHome, workdir, patchPaths };
   }
 
   private async sendMessage(): Promise<void> {
@@ -547,7 +546,7 @@ export class ChatView extends ItemView {
 
     const prep = await this.prepareRun(message);
     if (!prep.ok) return;
-    const { bin, nodeBin, dshScript, vaultRoot, task, dshHome, workdir, patchPaths } = prep;
+    const { bin, nodeBin, dshScript, task, dshHome, workdir, patchPaths } = prep;
     // P1-3: preparation degraded (DSH_HOME fallback, patch / skill / memory
     // write failures, workdir fallback…) — surface it once instead of running
     // degraded silently.
