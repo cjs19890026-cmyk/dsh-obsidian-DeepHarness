@@ -59,13 +59,18 @@ function applyInfo(el: HTMLElement, info?: DomElementInfo): void {
 }
 
 function installObsidianDomHelpers(): void {
+  /** Obsidian installs its helpers on the HTML *and* SVG element prototypes
+   *  (an SVG element created by createSvg has to be able to createSvg in turn),
+   *  so every helper is defined on both. */
   const define = (name: string, value: unknown): void => {
-    if (name in HTMLElement.prototype) return;
-    Object.defineProperty(HTMLElement.prototype, name, {
-      value,
-      writable: true,
-      configurable: true,
-    });
+    for (const proto of [HTMLElement.prototype, SVGElement.prototype]) {
+      if (name in proto) continue;
+      Object.defineProperty(proto, name, {
+        value,
+        writable: true,
+        configurable: true,
+      });
+    }
   };
 
   define('createEl', function createEl(
@@ -75,6 +80,19 @@ function installObsidianDomHelpers(): void {
   ): HTMLElement {
     const el = document.createElement(tag);
     applyInfo(el, info);
+    this.appendChild(el);
+    return el;
+  });
+
+  /** SVG variant: jsdom needs createElementNS, and the element must land in
+   *  the SVG namespace or it renders as an unknown HTML element. */
+  define('createSvg', function createSvg(
+    this: HTMLElement,
+    tag: string,
+    info?: DomElementInfo,
+  ): SVGElement {
+    const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    applyInfo(el as unknown as HTMLElement, info);
     this.appendChild(el);
     return el;
   });

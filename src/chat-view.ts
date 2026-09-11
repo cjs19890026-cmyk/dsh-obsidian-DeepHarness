@@ -52,11 +52,14 @@ export class ChatView extends ItemView {
   /** Last focused markdown view, so its selection can be read even while the
    *  chat panel has focus. Kept in sync via the active-leaf-change event. */
   private lastMarkdownView: MarkdownView | null = null;
-  /** Floating panels, each owning its own open/close state (see
-   *  floating-panel.ts). Assigned in the constructor: they need the toolbar
-   *  buttons, which are created lazily when the view first renders. */
-  private historyPanel!: HistoryPanel;
-  private skillPanel!: SkillPanel;
+  /**
+   * Floating panels, each owning its own open/close state (see
+   * floating-panel.ts). Built in onOpen(), because they anchor to the toolbar
+   * buttons — an ItemView has no DOM until onOpen runs, so creating them in the
+   * constructor would capture `undefined` anchors and every click would throw.
+   */
+  private historyPanel: HistoryPanel | null = null;
+  private skillPanel: SkillPanel | null = null;
   private skillSuggest: SkillSuggest | null = null;
   private statusTimer: number | null = null;
   private statusStartedAt = 0;
@@ -84,10 +87,6 @@ export class ChatView extends ItemView {
     // The plugin walks its open views on unload (Obsidian may skip onClose()),
     // so every view joins the registry at birth and leaves on teardown.
     plugin.registerChatView(this);
-    // The panels are stateless shells: they anchor to toolbar buttons that the
-    // field initializers can create only after the buttons exist.
-    this.historyPanel = new HistoryPanel(this, this.historyBtn);
-    this.skillPanel = new SkillPanel(this, this.skillBtn);
   }
 
   getViewType(): string {
@@ -173,6 +172,11 @@ export class ChatView extends ItemView {
     setIcon(this.historyBtn, 'clock');
     this.historyBtn.setAttribute('aria-label', t('chat.historyButton'));
     this.historyBtn.onclick = () => this.toggleHistoryPanel();
+
+    // The floating panels anchor to those two buttons, so they can only be
+    // built now that the toolbar exists (never in the constructor).
+    this.historyPanel = new HistoryPanel(this, this.historyBtn);
+    this.skillPanel = new SkillPanel(this, this.skillBtn);
 
     // Composer card: rich chip editor + toolbar (model/effort/security/meter/send)
     const composer = container.createDiv({ cls: 'dsh-composer' });
@@ -266,8 +270,8 @@ export class ChatView extends ItemView {
     if (welcomeSub) welcomeSub.textContent = t('chat.welcomeSub');
     this.updateTriggerLabels();
     // Floating panels carry their own localized labels; rebuild any that is open.
-    this.historyPanel.refresh();
-    this.skillPanel.refresh();
+    this.historyPanel?.refresh();
+    this.skillPanel?.refresh();
   }
 
   /** Refresh trigger button labels from settings. */
@@ -1114,25 +1118,41 @@ export class ChatView extends ItemView {
 
   // ── Floating panels (see floating-panel.ts / *-panel.ts) ───────────
 
+  /**
+   * The panels exist once onOpen() has built the toolbar. Callers that can run
+   * before that (teardown, locale change) must tolerate their absence; a click
+   * cannot happen without a rendered toolbar, so the panel must be there.
+   */
+  private requireHistoryPanel(): HistoryPanel {
+    if (!this.historyPanel) throw new Error('HistoryPanel used before onOpen() built the toolbar');
+    return this.historyPanel;
+  }
+
+  private requireSkillPanel(): SkillPanel {
+    if (!this.skillPanel) throw new Error('SkillPanel used before onOpen() built the toolbar');
+    return this.skillPanel;
+  }
+
   private toggleHistoryPanel(): void {
-    this.historyPanel.toggle();
+    this.requireHistoryPanel().toggle();
   }
 
   private toggleSkillPanel(): void {
-    this.skillPanel.toggle();
+    this.requireSkillPanel().toggle();
   }
 
   private closeHistoryPanel(): void {
-    this.historyPanel.close();
+    this.historyPanel?.close();
   }
 
   private closeSkillPanel(): void {
-    this.skillPanel.close();
+    this.skillPanel?.close();
   }
 
   /** Close whichever panel is open (Escape, teardown). */
   private closePanels(): void {
-    FloatingPanel.closeAll();
+    this.historyPanel?.close();
+    this.skillPanel?.close();
   }
 
   /** Public for SkillPanel: localized label for a skill's source badge. */
