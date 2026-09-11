@@ -185,6 +185,32 @@ export function buildDshEnv(
   return env;
 }
 
+/**
+ * Timer access for the default (non-injected) DshClient: the window's timers
+ * when there is a window, otherwise the global ones.
+ *
+ * The plugin runs in Obsidian's Electron renderer, where `window` is the
+ * window the caller is in — that stays preferred, per obsidianmd/no-global-this
+ * (a popout window keeps its own timers). A plain Node context — a unit test
+ * without a DOM, `node --test`, a main-process use — has no `window`;
+ * `globalThis` holds the same functions there.
+ *
+ * The host is resolved per call rather than in the constructor, so
+ * `new DshClient()` no longer throws a ReferenceError in Node just for being
+ * constructed (the previous `window.setTimeout` default was captured eagerly).
+ */
+function hostSetTimeout(handler: () => void, timeout?: number): unknown {
+  const host: { setTimeout: (h: () => void, ms?: number) => unknown } =
+    typeof window !== 'undefined' ? window : globalThis;
+  return host.setTimeout(handler, timeout);
+}
+
+function hostClearTimeout(handle: number): void {
+  const host: { clearTimeout: (h: number) => void } =
+    typeof window !== 'undefined' ? window : globalThis;
+  host.clearTimeout(handle);
+}
+
 export class DshClient {
   /** Every live client, so the plugin can kill all children on unload. */
   private static live = new Set<DshClient>();
@@ -195,8 +221,8 @@ export class DshClient {
 
   constructor(deps: DshClientDeps = {}) {
     this.deps = deps;
-    this.setTimeoutFn = deps.setTimeout ?? ((handler: () => void, timeout?: number): unknown => window.setTimeout(handler, timeout));
-    this.clearTimeoutFn = deps.clearTimeout ?? ((handle: unknown): void => window.clearTimeout(handle as number));
+    this.setTimeoutFn = deps.setTimeout ?? ((handler: () => void, timeout?: number): unknown => hostSetTimeout(handler, timeout));
+    this.clearTimeoutFn = deps.clearTimeout ?? ((handle: unknown): void => hostClearTimeout(handle as number));
     DshClient.live.add(this);
   }
 

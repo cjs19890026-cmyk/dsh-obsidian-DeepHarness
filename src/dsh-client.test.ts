@@ -396,3 +396,41 @@ describe('DshClient env isolation', () => {
   });
 });
 
+
+describe('DshClient default timers (no injected deps)', () => {
+  it('constructs and schedules timers in a windowless host (D-3)', async () => {
+    // The old default captured `window.setTimeout` eagerly in the constructor,
+    // so merely constructing a client outside a DOM threw a ReferenceError.
+    expect(typeof window).toBe('undefined');
+
+    const realSetTimeout = globalThis.setTimeout;
+    const realClearTimeout = globalThis.clearTimeout;
+    const setTimeoutSpy = vi.fn(realSetTimeout);
+    const clearTimeoutSpy = vi.fn(realClearTimeout);
+    globalThis.setTimeout = setTimeoutSpy as unknown as typeof setTimeout;
+    globalThis.clearTimeout = clearTimeoutSpy as unknown as typeof clearTimeout;
+
+    const client = new DshClient(); // no deps injected on purpose
+    try {
+      // Exits on its own, so the pending timeout timer is cleared by the
+      // normal close path instead of firing 60s later.
+      const exitJs = path.join(tmp, 'defaults-exit.js');
+      fs.writeFileSync(exitJs, 'process.exit(0);\n', 'utf8');
+      const result = await client.run('ignored', {
+        dshBin: process.execPath,
+        nodeBin: process.execPath,
+        dshScript: exitJs,
+        cwd: tmp,
+        timeoutMs: 60000,
+      });
+      expect(result.killReason).toBeNull();
+      // Both defaults resolved at call time against globalThis.
+      expect(setTimeoutSpy).toHaveBeenCalled();
+      expect(clearTimeoutSpy).toHaveBeenCalled();
+    } finally {
+      client.dispose();
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.clearTimeout = realClearTimeout;
+    }
+  });
+});
