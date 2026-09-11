@@ -12,6 +12,9 @@ import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, re
 import { HistoryTool } from './history';
 import { MentionSuggest } from './mention';
 import { ChipEditor } from './chip-editor';
+import { HistoryPanel } from './history-panel';
+import { SkillPanel } from './skill-panel';
+import { FloatingPanel } from './floating-panel';
 import { t } from './i18n';
 import { NoteCreatorModal } from './modals';
 
@@ -49,8 +52,11 @@ export class ChatView extends ItemView {
   /** Last focused markdown view, so its selection can be read even while the
    *  chat panel has focus. Kept in sync via the active-leaf-change event. */
   private lastMarkdownView: MarkdownView | null = null;
-  private historyPanel: HTMLElement | null = null;
-  private skillPanel: HTMLElement | null = null;
+  /** Floating panels, each owning its own open/close state (see
+   *  floating-panel.ts). Assigned in the constructor: they need the toolbar
+   *  buttons, which are created lazily when the view first renders. */
+  private historyPanel!: HistoryPanel;
+  private skillPanel!: SkillPanel;
   private skillSuggest: SkillSuggest | null = null;
   private statusTimer: number | null = null;
   private statusStartedAt = 0;
@@ -78,6 +84,10 @@ export class ChatView extends ItemView {
     // The plugin walks its open views on unload (Obsidian may skip onClose()),
     // so every view joins the registry at birth and leaves on teardown.
     plugin.registerChatView(this);
+    // The panels are stateless shells: they anchor to toolbar buttons that the
+    // field initializers can create only after the buttons exist.
+    this.historyPanel = new HistoryPanel(this, this.historyBtn);
+    this.skillPanel = new SkillPanel(this, this.skillBtn);
   }
 
   getViewType(): string {
@@ -256,8 +266,8 @@ export class ChatView extends ItemView {
     if (welcomeSub) welcomeSub.textContent = t('chat.welcomeSub');
     this.updateTriggerLabels();
     // Floating panels carry their own localized labels; rebuild any that is open.
-    if (this.historyPanel) this.openHistoryPanel();
-    if (this.skillPanel) this.openSkillPanel();
+    this.historyPanel.refresh();
+    this.skillPanel.refresh();
   }
 
   /** Refresh trigger button labels from settings. */
@@ -364,8 +374,7 @@ export class ChatView extends ItemView {
     this.closed = true;
     this.abortController?.abort();
     this.client.dispose();
-    this.closeHistoryPanel();
-    this.closeSkillPanel();
+    this.closePanels();
     this.mention?.dispose();
     this.mention = null;
     this.skillSuggest?.dispose();
@@ -1011,7 +1020,8 @@ export class ChatView extends ItemView {
     };
   }
 
-  private scrollToBottom(): void {
+  /** Public for SkillPanel: jumping to the composer after inserting a skill. */
+  scrollToBottom(): void {
     this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
   }
 
@@ -1046,8 +1056,9 @@ export class ChatView extends ItemView {
     this.scrollToBottom();
   }
 
-  /** Insert text at the caret with one-space separation from neighbours. */
-  private insertTextAtCursor(text: string): void {
+  /** Insert text at the caret with one-space separation from neighbours.
+   *  Public for SkillPanel: insert `/skill ` at the caret. */
+  insertTextAtCursor(text: string): void {
     this.editor.insertTextWithSpacing(text);
   }
 
@@ -1078,7 +1089,8 @@ export class ChatView extends ItemView {
   }
 
   /** Resume an archived session: re-activate it so new turns append back. */
-  private async resumeSession(s: import('./history').SessionRecord): Promise<void> {
+  /** Public for HistoryPanel: clicking a session row resumes it. */
+  async resumeSession(s: import('./history').SessionRecord): Promise<void> {
     const activated = await this.plugin.history?.activateSession(s.id);
     if (!activated) {
       new Notice(t('chat.resumeFail'));
@@ -1100,212 +1112,31 @@ export class ChatView extends ItemView {
     new Notice(t('chat.resumed', { title: activated.title }));
   }
 
-  // ── History panel (floating, anchored to the toolbar icon) ─────────
+  // ── Floating panels (see floating-panel.ts / *-panel.ts) ───────────
 
   private toggleHistoryPanel(): void {
-    if (this.historyPanel) {
-      this.closeHistoryPanel();
-      return;
-    }
-    this.openHistoryPanel();
+    this.historyPanel.toggle();
   }
 
-  private openHistoryPanel(): void {
-    this.closeHistoryPanel();
-    this.closeSkillPanel();
-    const panel = createDiv({ cls: 'dsh-history-panel' });
-    this.historyPanel = panel;
-
-    const sessions = this.plugin.history?.getSessions() ?? [];
-    if (sessions.length === 0) {
-      panel.createDiv({ cls: 'dsh-history-empty', text: t('chat.historyEmpty') });
-    } else {
-      for (const s of sessions) {
-        const item = panel.createDiv({
-          cls: `dsh-history-panel-item${s.pinned ? ' is-pinned' : ''}`,
-        });
-
-        // Row 1: bubble icon + title + (rename / pin / delete) icons
-        const row1 = item.createDiv({ cls: 'dsh-history-row1' });
-        const bubble = row1.createSpan({ cls: 'dsh-history-bubble' });
-        setIcon(bubble, 'message-circle');
-        const title = row1.createSpan({ cls: 'dsh-history-panel-title', text: s.title });
-
-        const renameBtn = row1.createEl('button', { cls: 'dsh-history-act' });
-        setIcon(renameBtn, 'pencil');
-        renameBtn.setAttribute('aria-label', t('chat.rename'));
-        renameBtn.onclick = (e) => {
-          e.stopPropagation();
-          this.renameInPanel(item, title, s);
-        };
-
-        const pinBtn = row1.createEl('button', { cls: `dsh-history-act${s.pinned ? ' is-active' : ''}` });
-        setIcon(pinBtn, 'pin');
-        pinBtn.setAttribute('aria-label', s.pinned ? t('chat.unpin') : t('chat.pin'));
-        pinBtn.onclick = (e) => {
-          e.stopPropagation();
-          void this.plugin.history?.togglePin(s.id).then(() => this.openHistoryPanel());
-        };
-
-        const delBtn = row1.createEl('button', { cls: 'dsh-history-act' });
-        setIcon(delBtn, 'x');
-        delBtn.setAttribute('aria-label', t('chat.deleteSession'));
-        delBtn.onclick = (e) => {
-          e.stopPropagation();
-          void this.plugin.history?.removeSession(s.id).then(() => this.openHistoryPanel());
-        };
-
-        // Row 2: date + editable note
-        const row2 = item.createDiv({ cls: 'dsh-history-row2' });
-        row2.createSpan({ cls: 'dsh-history-date', text: new Date(s.endedAt).toLocaleString() });
-        const note = row2.createSpan({ cls: 'dsh-history-note', text: s.note || t('chat.addNote') });
-        note.onclick = (e) => {
-          e.stopPropagation();
-          this.editNoteInPanel(note, s);
-        };
-
-        // Click the item anywhere (not on a button) → resume the session
-        item.onclick = () => {
-          this.closeHistoryPanel();
-          void this.resumeSession(s);
-        };
-      }
-    }
-
-    document.body.appendChild(panel);
-
-    // Anchor: the panel's bottom-right corner sits against the icon.
-    const rect = this.historyBtn.getBoundingClientRect();
-    panel.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
-    panel.style.bottom = `${window.innerHeight - rect.top + 4}px`;
-
-    window.setTimeout(() => {
-      document.addEventListener('mousedown', this.onPanelOutside);
-    }, 0);
-    document.addEventListener('keydown', this.onPanelKeydown);
-  }
-
-  /** Inline rename of a session title inside the panel. */
-  private renameInPanel(item: HTMLElement, titleEl: HTMLElement, s: import('./history').SessionRecord): void {
-    const input = createEl('input', { cls: 'dsh-history-rename-input' });
-    input.value = s.title;
-    titleEl.replaceWith(input);
-    input.focus();
-    input.select();
-    const commit = (): void => {
-      const v = input.value.trim();
-      if (v) void this.plugin.history?.renameSession(s.id, v);
-      this.openHistoryPanel();
-    };
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); commit(); }
-      else if (e.key === 'Escape') { this.openHistoryPanel(); }
-    });
-    input.addEventListener('blur', commit);
-    input.addEventListener('click', (e) => e.stopPropagation());
-  }
-
-  /** Inline note editing inside the panel. */
-  private editNoteInPanel(noteEl: HTMLElement, s: import('./history').SessionRecord): void {
-    const input = createEl('input', { cls: 'dsh-history-note-input' });
-    input.value = s.note || '';
-    input.placeholder = t('chat.addNote');
-    noteEl.replaceWith(input);
-    input.focus();
-    const commit = (): void => {
-      void this.plugin.history?.setNote(s.id, input.value);
-      this.openHistoryPanel();
-    };
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); commit(); }
-      else if (e.key === 'Escape') { this.openHistoryPanel(); }
-    });
-    input.addEventListener('blur', commit);
-    input.addEventListener('click', (e) => e.stopPropagation());
+  private toggleSkillPanel(): void {
+    this.skillPanel.toggle();
   }
 
   private closeHistoryPanel(): void {
-    if (this.historyPanel) {
-      this.historyPanel.remove();
-      this.historyPanel = null;
-    }
-    document.removeEventListener('mousedown', this.onPanelOutside);
-    document.removeEventListener('keydown', this.onPanelKeydown);
-  }
-
-  private onPanelOutside = (e: MouseEvent): void => {
-    if (this.historyPanel && !this.historyPanel.contains(e.target as Node)) {
-      this.closeHistoryPanel();
-    }
-    if (this.skillPanel && !this.skillPanel.contains(e.target as Node)) {
-      this.closeSkillPanel();
-    }
-  };
-
-  private onPanelKeydown = (e: KeyboardEvent): void => {
-    if (e.key === 'Escape') {
-      this.closeHistoryPanel();
-      this.closeSkillPanel();
-    }
-  };
-
-  // ── Skill panel (floating, anchored to the toolbar icon) ─────────
-
-  private toggleSkillPanel(): void {
-    if (this.skillPanel) {
-      this.closeSkillPanel();
-      return;
-    }
-    this.openSkillPanel();
-  }
-
-  private openSkillPanel(): void {
-    this.closeHistoryPanel();
-    this.closeSkillPanel();
-    const panel = createDiv({ cls: 'dsh-history-panel dsh-skill-panel' });
-    this.skillPanel = panel;
-
-    const skills = this.scanSkills();
-    if (skills.length === 0) {
-      panel.createDiv({ cls: 'dsh-history-empty', text: t('chat.skillEmpty') });
-    } else {
-      for (const s of skills) {
-        const item = panel.createDiv({ cls: 'dsh-skill-item' });
-        const row1 = item.createDiv({ cls: 'dsh-skill-row1' });
-        row1.createSpan({ cls: 'dsh-skill-name', text: s.name });
-        row1.createSpan({ cls: 'dsh-skill-badge', text: this.skillSourceLabel(s.source) });
-        item.createDiv({ cls: 'dsh-skill-desc', text: s.description });
-        item.onclick = () => {
-          this.closeSkillPanel();
-          this.insertTextAtCursor(`/${s.name} `);
-          this.scrollToBottom();
-        };
-      }
-    }
-
-    document.body.appendChild(panel);
-
-    // Anchor: same geometry as the history panel.
-    const rect = this.skillBtn.getBoundingClientRect();
-    panel.style.right = `${Math.max(8, window.innerWidth - rect.right)}px`;
-    panel.style.bottom = `${window.innerHeight - rect.top + 4}px`;
-
-    window.setTimeout(() => {
-      document.addEventListener('mousedown', this.onPanelOutside);
-    }, 0);
-    document.addEventListener('keydown', this.onPanelKeydown);
+    this.historyPanel.close();
   }
 
   private closeSkillPanel(): void {
-    if (this.skillPanel) {
-      this.skillPanel.remove();
-      this.skillPanel = null;
-    }
-    document.removeEventListener('mousedown', this.onPanelOutside);
-    document.removeEventListener('keydown', this.onPanelKeydown);
+    this.skillPanel.close();
   }
 
-  private skillSourceLabel(source: SkillEntry['source']): string {
+  /** Close whichever panel is open (Escape, teardown). */
+  private closePanels(): void {
+    FloatingPanel.closeAll();
+  }
+
+  /** Public for SkillPanel: localized label for a skill's source badge. */
+  skillSourceLabel(source: SkillEntry['source']): string {
     switch (source) {
       case 'project': return t('chat.skillSourceProject');
       case 'extra': return t('chat.skillSourceExtra');
@@ -1334,7 +1165,9 @@ export class ChatView extends ItemView {
    * the sync readdirSync/readFileSync scan only reruns after a vault change
    * or an extraSkillDirs edit, not on every panel open / popup trigger.
    */
-  private scanSkills(): SkillEntry[] {
+  /** Public for SkillPanel: the cached catalog (P2-I), shared so the panel
+   *  never triggers its own filesystem walk. */
+  scanSkills(): SkillEntry[] {
     const vaultRoot = this.plugin.getVaultRoot();
     // Key covers every input of the scan; cheap to compute per call.
     const key = `${vaultRoot}\u0000${this.plugin.settings.extraSkillDirs.trim()}`;

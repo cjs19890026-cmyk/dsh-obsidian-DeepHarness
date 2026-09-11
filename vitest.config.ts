@@ -1,6 +1,16 @@
 import { defineConfig } from 'vitest/config';
+import { fileURLToPath } from 'node:url';
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      // The published `obsidian` package is types-only (`"main": ""`), so Vite
+      // cannot resolve the specifier at all: importing any module that does
+      // `import … from 'obsidian'` fails in import analysis, before
+      // vi.mock('obsidian', …) can apply. Tests still mock it themselves.
+      obsidian: fileURLToPath(new URL('./test/obsidian-stub.ts', import.meta.url)),
+    },
+  },
   test: {
     // Node is the default environment: nearly every test file is pure-function
     // or fs work. The single DOM test (src/chip-editor.test.ts) opts in with a
