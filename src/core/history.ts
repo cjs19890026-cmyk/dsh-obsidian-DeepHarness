@@ -55,23 +55,24 @@ function titleFromTurn(user: string): string {
 export class HistoryStore {
   private sessions: SessionRecord[] = [];
   private current: SessionRecord;
-  /** Absolute path to history.json. */
-  private absPath: string;
 
   constructor(
     /**
-     * Absolute path to history.json.
+     * Resolves the absolute path to history.json. Called on every read and
+     * write, never captured.
      *
-     * It used to be resolved relative to the vault's base path, which broke as
-     * soon as dsh-home (and with it this file) moved outside the vault: joining
-     * a vault base with an absolute path yields nonsense. Callers now pass the
-     * finished path — the plugin builds it from `paths.ts`.
+     * A function rather than a string because the location can move *during*
+     * the plugin's lifetime: the one-time migration of the plugin's DSH_HOME
+     * out of the vault runs at the first task, which is after `onload()` has
+     * already built this store. A captured path meant the whole session kept
+     * writing to the old directory (it did — the migrated copy silently went
+     * stale). Resolving late also keeps it honest if the user changes dshHome in
+     * settings.
      */
-    absPath: string,
+    private readonly resolvePath: () => string,
     private limit: number,
   ) {
     this.current = this.newSession();
-    this.absPath = absPath;
   }
 
   /** Archived sessions: pinned first, then newest first. */
@@ -95,7 +96,7 @@ export class HistoryStore {
 
   async load(): Promise<void> {
     try {
-      const raw = await fs.promises.readFile(this.absPath, 'utf8');
+      const raw = await fs.promises.readFile(this.resolvePath(), 'utf8');
       const parsed = JSON.parse(raw) as { sessions?: SessionRecord[]; current?: SessionRecord };
       this.sessions = Array.isArray(parsed.sessions)
         ? parsed.sessions.map((s) => ({ ...s, pinned: s.pinned ?? false, note: s.note ?? '' }))
@@ -238,10 +239,11 @@ export class HistoryStore {
       ...(this.current.turns.length > 0 ? { current: this.current } : {}),
     }, null, 2);
     try {
-      fs.mkdirSync(path.dirname(this.absPath), { recursive: true });
-      const tmp = `${this.absPath}.tmp`;
+      const absPath = this.resolvePath();
+      fs.mkdirSync(path.dirname(absPath), { recursive: true });
+      const tmp = `${absPath}.tmp`;
       fs.writeFileSync(tmp, payload, 'utf8');
-      fs.renameSync(tmp, this.absPath);
+      fs.renameSync(tmp, absPath);
     } catch (e) {
       new Notice(t('chat.historySaveFailed', { message: e instanceof Error ? e.message : String(e) }));
     }

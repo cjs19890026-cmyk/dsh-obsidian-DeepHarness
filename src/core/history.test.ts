@@ -31,7 +31,7 @@ function makeApp(base: string): App {
 }
 
 function makeHistory(limit: number): HistoryStore {
-  return new HistoryStore(path.join(tmp, HISTORY_FILE), limit);
+  return new HistoryStore(() => path.join(tmp, HISTORY_FILE), limit);
 }
 
 function makeTurn(user: string, ts: number): HistoryTurn {
@@ -209,5 +209,35 @@ describe('HistoryStore atomic write', () => {
     expect(fs.existsSync(absPath)).toBe(true);
     expect(fs.existsSync(`${absPath}.tmp`)).toBe(false);
     expect(() => JSON.parse(fs.readFileSync(absPath, 'utf8'))).not.toThrow();
+  });
+});
+
+describe('HistoryStore follows its path when it moves', () => {
+  it('writes to the new location after the plugin data folder is migrated', async () => {
+    // The bug this guards: the plugin's DSH_HOME migration runs at the first
+    // task, after onload() built the store. A path captured at construction kept
+    // the whole session writing into the old (migrated-from) directory, so the
+    // migrated copy silently went stale.
+    const oldDir = path.join(tmp, 'in-vault');
+    const newDir = path.join(tmp, 'system');
+    let target = oldDir;
+    const store = new HistoryStore(() => path.join(target, HISTORY_FILE), 50);
+
+    await addAndEnd(store, 'before the move', 1);
+    const oldPath = path.join(oldDir, HISTORY_FILE);
+    expect(fs.existsSync(oldPath)).toBe(true);
+
+    // The migration happens now; the very same store must follow it.
+    target = newDir;
+    await addAndEnd(store, 'after the move', 2);
+
+    const newPath = path.join(newDir, HISTORY_FILE);
+    expect(fs.existsSync(newPath)).toBe(true);
+    const moved = JSON.parse(fs.readFileSync(newPath, 'utf8')) as { sessions: SessionRecord[] };
+    expect(moved.sessions.map((s) => s.turns[0]?.user)).toContain('after the move');
+    // The old file is left as it was — migration copies, it does not move data
+    // back and forth.
+    const left = JSON.parse(fs.readFileSync(oldPath, 'utf8')) as { sessions: SessionRecord[] };
+    expect(left.sessions.map((s) => s.turns[0]?.user)).not.toContain('after the move');
   });
 });

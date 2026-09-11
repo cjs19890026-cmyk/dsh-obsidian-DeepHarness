@@ -31,13 +31,20 @@ export default class DshPlugin extends Plugin {
     // DSH_HOME outside the vault (see paths.ts), so this is an absolute path.
     // Same resolution the run path uses (see resolvePluginDshHome), so the
     // history file the plugin reads is the one it writes — including the legacy
-    // fallback when a migration could not complete.
-    const vaultRoot = this.getVaultRoot();
-    const historyFile = path.join(
-      resolvePluginDshHome(vaultRoot, this.app.vault.configDir, resolveUserDshHome(this.settings.dshHome)),
-      'history.json',
+    // fallback when a migration could not complete. Passed as a *resolver*: the
+    // DSH_HOME migration runs at the first task, after onload(), and a path
+    // captured here would keep the whole session writing to the old directory.
+    this.history = new HistoryStore(
+      () => path.join(
+        resolvePluginDshHome(
+          this.getVaultRoot(),
+          this.app.vault.configDir,
+          resolveUserDshHome(this.settings.dshHome),
+        ),
+        'history.json',
+      ),
+      this.settings.historyLimit,
     );
-    this.history = new HistoryStore(historyFile, this.settings.historyLimit);
     await this.history.load();
 
     // Register chat view
