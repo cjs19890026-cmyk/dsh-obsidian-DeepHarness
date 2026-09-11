@@ -8,3 +8,8 @@ HANDOFF.md
 
 # macOS
 .DS_Store
+
+# Unrelated to the plugin: keeps `git status` clean so "is the working tree
+# dirty?" stays a meaningful signal.
+Minecraft AI/
+.workbuddy/
