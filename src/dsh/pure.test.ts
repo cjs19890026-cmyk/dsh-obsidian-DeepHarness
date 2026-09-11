@@ -15,7 +15,7 @@ import {
   partialTurnAnswer,
 } from './pure';
 import { estimateTokens } from '../core/context-meter';
-import { PLUGIN_ID, pluginPaths } from './paths';
+import { PLUGIN_ID, isInside, pluginPaths } from './paths';
 
 describe('estimateTokens', () => {
   it('returns 0 for empty input', () => {
@@ -356,5 +356,27 @@ describe('pluginPaths (on-disk layout boundary)', () => {
     const file = pluginPaths('', '.obsidian').dshHomeFile('history.json');
     expect(path.isAbsolute(file)).toBe(false);
     expect(file).toBe(path.join('.obsidian', 'plugins', 'deepharness', 'dsh-home', 'history.json'));
+  });
+});
+
+describe('isInside (DSH_HOME guardrail)', () => {
+  it('accepts a path inside the parent', () => {
+    expect(isInside('/vault/.obsidian/plugins/deepharness/dsh-home', '/vault')).toBe(true);
+    expect(isInside('/vault', '/vault')).toBe(true);
+  });
+
+  it('rejects a sibling whose name merely starts with the parent', () => {
+    // The classic prefix-comparison bug: '/vault-2' is not inside '/vault'.
+    expect(isInside('/vault-2/dsh-home', '/vault')).toBe(false);
+    expect(isInside('/Users/me/VaultBackup/x', '/Users/me/Vault')).toBe(false);
+  });
+
+  it('rejects the parent itself being inside the child', () => {
+    expect(isInside('/vault', '/vault/sub')).toBe(false);
+  });
+
+  it('handles trailing separators and relative segments', () => {
+    expect(isInside('/vault/a/../b', '/vault/')).toBe(true);
+    expect(isInside('/vault/./x', '/vault')).toBe(true);
   });
 });

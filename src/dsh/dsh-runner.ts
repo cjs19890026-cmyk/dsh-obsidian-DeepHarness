@@ -9,7 +9,7 @@ import type { DshSettings } from '../settings/index';
 import { ensureObsidianSkill as writeObsidianSkill, MEMORY_FILE } from '../core/obsidian-skill';
 import { t, getLocale } from '../i18n/index';
 import { extractTopLevelBlock, readDshSettings, type DshConfigSnapshot } from './dsh-config';
-import { pluginPaths } from './paths';
+import { pluginPaths, resolveUserDshHome, systemDshHomeDir } from './paths';
 
 const execFileAsync = promisify(execFile);
 
@@ -99,6 +99,86 @@ export function diagnosticProbe(
   };
 }
 
+
+/**
+ * What must survive the move out of the vault.
+ *
+ * `profiles/` is deliberately absent: it is DSH's own bootstrap cache (400+
+ * symlinks into the installed dsh package on macOS, tens of thousands of real
+ * files on Windows) and DSH rebuilds it on the next run. Copying it would be
+ * both pointless and the slowest part of the migration — and re-creating its
+ * symlinks by hand is exactly the fragile step this move exists to avoid.
+ */
+const MIGRATED_DSH_HOME_ENTRIES = [
+  'history.json',
+  'settings.yaml',
+  '.anonymous-user-id',
+  'sessions',
+  'skills',
+];
+
+export interface DshHomeMigration {
+  /** Where the plugin will actually run from. */
+  dshHome: string;
+  /** True when the legacy in-vault home still exists (rollback is possible). */
+  migratedFrom: string | null;
+}
+
+/**
+ * Move the plugin's DSH_HOME out of the vault, once.
+ *
+ * Existing installs have the directory inside the vault; new ones never will.
+ * The legacy tree is **copied, never deleted** — it is the rollback path, and
+ * deleting a user's data as a side effect of an upgrade is not acceptable. A
+ * failure at any point returns the legacy path so the plugin keeps working
+ * exactly as before, and reports it as a preparation issue rather than throwing.
+ */
+export function migrateDshHomeToSystem(
+  vaultRoot: string,
+  configDir: string,
+  userDshHome: string,
+  issues?: PreparationIssue[],
+): DshHomeMigration {
+  const legacy = pluginPaths(vaultRoot, configDir).dshHomeDir;
+  const target = systemDshHomeDir(vaultRoot, userDshHome);
+
+  try {
+    // Establish the target first, unconditionally: whether the system location
+    // is usable is the question that decides this function's answer, and it must
+    // not be masked by "there was nothing to migrate anyway" (a fresh install
+    // must fail here loudly rather than later, pointing at the wrong path).
+    fs.mkdirSync(target, { recursive: true });
+    fs.chmodSync(target, 0o755);
+
+    // Nothing to move: no legacy tree, or a previous migration already ran (the
+    // legacy tree holds nothing the copy below does not already cover).
+    if (!fs.existsSync(legacy) || fs.existsSync(path.join(target, '.migrated'))) {
+      return { dshHome: target, migratedFrom: null };
+    }
+
+    for (const entry of MIGRATED_DSH_HOME_ENTRIES) {
+      const from = path.join(legacy, entry);
+      if (!fs.existsSync(from)) continue;
+      copyTreeInto(from, path.join(target, entry));
+    }
+    // Marker so a later run does not copy a stale legacy tree back over data
+    // the plugin has since written at the new location.
+    fs.writeFileSync(path.join(target, '.migrated'), `${new Date().toISOString()}\n`, 'utf8');
+    return { dshHome: target, migratedFrom: legacy };
+  } catch {
+    issues?.push({
+      level: 'warning',
+      code: 'dsh-home-migrate',
+      message: t('chat.degrade.dshHomeMigrate', { path: legacy }),
+    });
+    return { dshHome: legacy, migratedFrom: null };
+  }
+}
+
+/** Recursive copy that preserves symlinks (the credentials link stays live). */
+function copyTreeInto(from: string, to: string): void {
+  fs.cpSync(from, to, { recursive: true, force: true, dereference: false });
+}
 
 /** Extra common Windows locations for the dsh CLI (npm global prefix). */
 function windowsDshCandidates(): string[] {
@@ -401,13 +481,9 @@ export class DshRunner {
     }
   }
 
-  /** Effective DSH_HOME (expand ~). */
+  /** Effective DSH_HOME (expand ~). See paths.resolveUserDshHome. */
   dshHome(): string {
-    const home = this.settings.dshHome.trim() || '~/.dsh';
-    if (home === '~/.dsh') {
-      return path.join(os.homedir(), '.dsh');
-    }
-    return home.startsWith('~/') ? path.join(os.homedir(), home.slice(2)) : home;
+    return resolveUserDshHome(this.settings.dshHome);
   }
 
   /**
@@ -463,19 +539,35 @@ export class DshRunner {
     }
   }
 
+  /**
+   * Prepare the plugin's isolated DSH_HOME, **outside the vault**, and return
+   * where it ended up.
+   *
+   * Returns null when it cannot be prepared at all, in which case the caller
+   * falls back to the user's real DSH_HOME (the model dropdown then has no
+   * effect — that is the pre-existing behaviour this keeps).
+   */
   ensurePluginDshHome(
     vaultRoot: string,
     sel: { model: string; effort: string },
     issues?: PreparationIssue[],
+    /** The user's real DSH root; injectable so tests never write into the
+     *  machine's actual `~/.dsh`. Defaults to the configured one. */
+    userDshHome: string = this.dshHome(),
   ): string | null {
-    const base = this.pluginHomeDir(vaultRoot);
+    const { dshHome: base } = migrateDshHomeToSystem(
+      vaultRoot,
+      this.configDir,
+      userDshHome,
+      issues,
+    );
     try {
       fs.mkdirSync(base, { recursive: true });
       // Same as ensureVaultPatch: force standard perms (missing execute bit
       // silently breaks settings.yaml writes).
       fs.chmodSync(base, 0o755);
       // Reuse credentials from the user's real DSH home (symlink once).
-      const credSrc = path.join(this.dshHome(), '.credentials.yaml');
+      const credSrc = path.join(userDshHome, '.credentials.yaml');
       const credDst = path.join(base, '.credentials.yaml');
       if (fs.existsSync(credSrc) && !fs.existsSync(credDst)) {
         // Prefer a symlink (credentials stay live); Windows usually lacks
@@ -836,5 +928,32 @@ export class DshRunner {
     } catch {
       return false;
     }
+  }
+}
+
+/**
+ * Where the plugin's DSH_HOME is, without preparing or creating anything.
+ *
+ * `main.ts` (history file) and the run path must agree on this, or the plugin
+ * would read a different history.json than it writes. It mirrors
+ * {@link migrateDshHomeToSystem}'s decision — system location when it is usable,
+ * the legacy in-vault tree when a migration failed and left that as the only
+ * option — without touching the disk.
+ */
+export function resolvePluginDshHome(
+  vaultRoot: string,
+  configDir: string,
+  userDshHome: string,
+): string {
+  const legacy = pluginPaths(vaultRoot, configDir).dshHomeDir;
+  try {
+    const target = systemDshHomeDir(vaultRoot, userDshHome);
+    // A migration that never completed leaves the legacy tree as the live one.
+    if (fs.existsSync(legacy) && !fs.existsSync(path.join(target, '.migrated'))) {
+      return fs.existsSync(target) ? target : legacy;
+    }
+    return target;
+  } catch {
+    return legacy;
   }
 }

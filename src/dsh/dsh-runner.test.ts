@@ -192,6 +192,7 @@ describe('DshRunner.buildTask and workdir', () => {
 describe('DshRunner generated-file writes are atomic', () => {
   let dir: string;
   let vaultRoot: string;
+  let userHome: string;
   let settings: DshSettings;
   let runner: DshRunner;
   const generatedRel = path.join('.obsidian', 'plugins', 'deepharness', 'generated');
@@ -229,6 +230,10 @@ describe('DshRunner generated-file writes are atomic', () => {
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-runner-atomic-'));
     vaultRoot = path.join(dir, 'vault');
+    // The plugin's DSH_HOME now lives under the user's real DSH root; point it
+    // at the temp dir so a test run never touches the machine's actual ~/.dsh.
+    userHome = path.join(dir, 'user-dsh');
+    fs.mkdirSync(userHome, { recursive: true });
     fs.mkdirSync(path.join(vaultRoot, 'Skills'), { recursive: true });
     settings = makeSettings();
     runner = new DshRunner(settings, '.obsidian');
@@ -260,7 +265,12 @@ describe('DshRunner generated-file writes are atomic', () => {
   });
 
   it('ensurePluginDshHome writes settings.yaml atomically', () => {
-    const home = runner.ensurePluginDshHome(vaultRoot, { model: 'deepseek-v4-pro', effort: 'max' });
+    const home = runner.ensurePluginDshHome(
+      vaultRoot,
+      { model: 'deepseek-v4-pro', effort: 'max' },
+      undefined,
+      userHome,
+    );
     expect(home).not.toBeNull();
     const yaml = fs.readFileSync(path.join(home as string, 'settings.yaml'), 'utf8');
     expect(yaml).toContain('model: deepseek-v4-pro');
@@ -272,6 +282,7 @@ describe('DshRunner generated-file writes are atomic', () => {
 describe('DshRunner preparation degradation reporting (P1-3)', () => {
   let dir: string;
   let vaultRoot: string;
+  let userHome: string;
   let settings: DshSettings;
   let runner: DshRunner;
 
@@ -303,6 +314,10 @@ describe('DshRunner preparation degradation reporting (P1-3)', () => {
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-runner-degrade-'));
     vaultRoot = path.join(dir, 'vault');
+    // The plugin's DSH_HOME now lives under the user's real DSH root; point it
+    // at the temp dir so a test run never touches the machine's actual ~/.dsh.
+    userHome = path.join(dir, 'user-dsh');
+    fs.mkdirSync(userHome, { recursive: true });
     fs.mkdirSync(vaultRoot);
     fs.mkdirSync(path.join(vaultRoot, 'Skills'), { recursive: true });
     settings = makeSettings();
@@ -369,15 +384,119 @@ describe('DshRunner preparation degradation reporting (P1-3)', () => {
   });
 
   it('reports when the plugin DSH_HOME cannot be created', () => {
+    // Block both locations: the system one (a file where the per-vault folder
+    // goes) and the legacy in-vault one. Only then is there nowhere to run from,
+    // and the caller falls back to the user's real DSH_HOME.
+    fs.writeFileSync(path.join(userHome, 'deepharness'), 'a file in the way');
     fs.writeFileSync(path.join(vaultRoot, '.obsidian'), 'a file in the way');
     const issues: PreparationIssue[] = [];
     const home = runner.ensurePluginDshHome(
       vaultRoot,
       { model: 'deepseek-v4-flash', effort: 'high' },
       issues,
+      userHome,
     );
     expect(home).toBeNull();
-    expect(codes(issues)).toEqual(['dsh-home']);
+    // Migration is reported first, then the DSH_HOME failure.
+    expect(codes(issues)).toEqual(['dsh-home-migrate', 'dsh-home']);
+  });
+
+  it('uses the system location for a fresh install, never the vault', () => {
+    const issues: PreparationIssue[] = [];
+    const home = runner.ensurePluginDshHome(
+      vaultRoot,
+      { model: 'deepseek-v4-flash', effort: 'high' },
+      issues,
+      userHome,
+    );
+    expect(issues).toEqual([]);
+    expect(home).not.toBeNull();
+    expect((home as string).startsWith(path.join(userHome, 'deepharness'))).toBe(true);
+    expect((home as string).startsWith(vaultRoot)).toBe(false);
+    // No in-vault dsh-home is created at all for a new install.
+    expect(fs.existsSync(path.join(vaultRoot, '.obsidian', 'plugins', 'deepharness', 'dsh-home')))
+      .toBe(false);
+  });
+
+  it('falls back to the legacy in-vault home when the system location fails', () => {
+    // A pre-existing install: the legacy tree has content the plugin can use.
+    const legacy = path.join(vaultRoot, '.obsidian', 'plugins', 'deepharness', 'dsh-home');
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'history.json'), '{"sessions":[]}', 'utf8');
+    fs.writeFileSync(path.join(userHome, 'deepharness'), 'a file in the way');
+
+    const issues: PreparationIssue[] = [];
+    const home = runner.ensurePluginDshHome(
+      vaultRoot,
+      { model: 'deepseek-v4-flash', effort: 'high' },
+      issues,
+      userHome,
+    );
+
+    // Degraded, but working: it runs from the legacy location rather than
+    // refusing to start, and the user is told why.
+    expect(home).toBe(legacy);
+    expect(codes(issues)).toEqual(['dsh-home-migrate']);
+  });
+
+  it('migrates an existing in-vault home out of the vault, keeping the old tree', () => {
+    const legacy = path.join(vaultRoot, '.obsidian', 'plugins', 'deepharness', 'dsh-home');
+    fs.mkdirSync(path.join(legacy, 'skills', 'obsidian'), { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'history.json'), '{"sessions":["kept"]}', 'utf8');
+    fs.writeFileSync(path.join(legacy, '.anonymous-user-id'), 'abc', 'utf8');
+    fs.writeFileSync(path.join(legacy, 'skills', 'obsidian', 'SKILL.md'), '# skill', 'utf8');
+
+    const issues: PreparationIssue[] = [];
+    const home = runner.ensurePluginDshHome(
+      vaultRoot,
+      { model: 'deepseek-v4-flash', effort: 'high' },
+      issues,
+      userHome,
+    );
+
+    expect(issues).toEqual([]);
+    // It must NOT be inside the vault any more — that is the whole point.
+    expect(home).not.toBeNull();
+    expect((home as string).startsWith(vaultRoot)).toBe(false);
+    expect((home as string).startsWith(userHome)).toBe(true);
+    // The data users cannot regenerate travelled with it.
+    expect(fs.readFileSync(path.join(home as string, 'history.json'), 'utf8')).toContain('kept');
+    expect(fs.readFileSync(path.join(home as string, '.anonymous-user-id'), 'utf8')).toBe('abc');
+    expect(fs.existsSync(path.join(home as string, 'skills', 'obsidian', 'SKILL.md'))).toBe(true);
+    // The source tree is left intact: it is the rollback path.
+    expect(fs.existsSync(path.join(legacy, 'history.json'))).toBe(true);
+  });
+
+  it('does not copy the bootstrap profile cache during migration', () => {
+    // profiles/ is DSH's own cache (400+ symlinks on macOS, tens of thousands
+    // of files on Windows) and DSH rebuilds it. Copying it would be the slowest
+    // part of the move and the very thing that broke synced vaults.
+    const legacy = path.join(vaultRoot, '.obsidian', 'plugins', 'deepharness', 'dsh-home');
+    fs.mkdirSync(path.join(legacy, 'profiles', 'node_modules'), { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'profiles', 'node_modules', 'junk.js'), 'x', 'utf8');
+
+    const home = runner.ensurePluginDshHome(
+      vaultRoot,
+      { model: 'deepseek-v4-flash', effort: 'high' },
+      undefined,
+      userHome,
+    );
+
+    expect(fs.existsSync(path.join(home as string, 'profiles'))).toBe(false);
+  });
+
+  it('is idempotent: a second run does not re-copy over the migrated home', () => {
+    const legacy = path.join(vaultRoot, '.obsidian', 'plugins', 'deepharness', 'dsh-home');
+    fs.mkdirSync(legacy, { recursive: true });
+    fs.writeFileSync(path.join(legacy, 'history.json'), 'old', 'utf8');
+
+    const first = runner.ensurePluginDshHome(vaultRoot, { model: 'm', effort: 'high' }, undefined, userHome);
+    // The plugin has since written its own history at the new location.
+    fs.writeFileSync(path.join(first as string, 'history.json'), 'new', 'utf8');
+
+    const second = runner.ensurePluginDshHome(vaultRoot, { model: 'm', effort: 'high' }, undefined, userHome);
+    expect(second).toBe(first);
+    expect(fs.readFileSync(path.join(second as string, 'history.json'), 'utf8')).toBe('new');
   });
 
   it('reports when the generated patch directory cannot be created', async () => {
@@ -465,7 +584,12 @@ describe('DshRunner inherits the user DSH_HOME config', () => {
   }
 
   function readPluginYaml(): string {
-    const home = runner.ensurePluginDshHome(vaultRoot, { model: 'deepseek-flash', effort: 'high' });
+    const home = runner.ensurePluginDshHome(
+      vaultRoot,
+      { model: 'deepseek-flash', effort: 'high' },
+      undefined,
+      userHome,
+    );
     expect(home).not.toBeNull();
     return fs.readFileSync(path.join(home as string, 'settings.yaml'), 'utf8');
   }

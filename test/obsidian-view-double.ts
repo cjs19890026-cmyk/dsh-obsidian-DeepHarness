@@ -13,6 +13,10 @@
  * covers the class surface.
  */
 
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
 interface ViewLike {
   containerEl: HTMLElement;
   app: unknown;
@@ -74,8 +78,16 @@ export class FakeMarkdownView {
   editor = { getSelection: () => '' };
 }
 
-/** A workspace/app stub with the surface a view actually touches. */
-export function makeAppDouble(vaultRoot = '/tmp/dsh-vault') {
+/**
+ * A workspace/app stub with the surface a view actually touches.
+ *
+ * The default vault root is a fresh temp directory rather than a fake path like
+ * `/tmp/dsh-vault`: the plugin derives its DSH_HOME from the vault path *and*
+ * the user's dshHome setting, so a synthetic path that is not genuinely
+ * temporary ends up creating directories in the machine's real `~/.dsh`.
+ */
+export function makeAppDouble(vaultRoot?: string) {
+  vaultRoot = vaultRoot ?? fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-view-vault-'));
   const vault = {
     configDir: '.obsidian',
     getName: () => 'vault',
@@ -114,9 +126,12 @@ export function makePluginDouble(app: ReturnType<typeof makeAppDouble>) {
       customPersona: '',
       extraSkillDirs: '',
       apiKey: '',
+      // The plugin places its DSH_HOME under this root. Point it at a temp dir:
+      // with the real default ('') the derived path lands in the machine's
+      // actual ~/.dsh, so merely running the tests would litter it.
+      dshHome: fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-view-home-')),
       dshBin: '',
       nodeBin: '',
-      dshHome: '',
       workdir: '',
       timeoutSec: 600,
       // buildTask only injects conversation memory when this is on (it is on

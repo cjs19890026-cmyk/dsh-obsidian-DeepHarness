@@ -15,6 +15,7 @@ import { ChipEditor } from './chip-editor';
 import { HistoryPanel } from './history-panel';
 import { SkillPanel } from './skill-panel';
 import { t, type TranslationKey } from '../i18n/index';
+import { isInside } from '../dsh/paths';
 import { NoteCreatorModal } from './modals';
 
 export const VIEW_TYPE_CHAT = 'deepharness-chat';
@@ -525,6 +526,20 @@ export class ChatView extends ItemView {
       effort: this.plugin.settings.reasoningEffort,
     }, issues);
     const dshHome = pluginHome ?? this.runner.dshHome();
+    // Guardrail: the plugin's DSH_HOME must never live inside the vault. It used
+    // to, and that made DSH bootstrap its headless profile (400+ symlinks, or
+    // tens of thousands of files on Windows) inside a synced folder — the iCloud
+    // stall this move exists to fix. If a future change ever puts it back, report
+    // it loudly rather than silently re-creating that failure. It is a report and
+    // not a hard stop on purpose: the plugin still works, and refusing to run
+    // would punish the user for a mistake that is ours.
+    if (isInside(dshHome, vaultRoot)) {
+      issues.push({
+        level: 'warning',
+        code: 'dsh-home-inside-vault',
+        message: t('chat.degrade.dshHomeInsideVault', { path: dshHome }),
+      });
+    }
     const workdir = this.runner.workdir(vaultRoot, issues);
 
     return { ok: true, issues, bin, nodeBin, dshScript, task, dshHome, workdir, patchPaths };

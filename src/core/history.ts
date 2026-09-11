@@ -1,4 +1,4 @@
-import { App, Notice } from 'obsidian';
+import { Notice } from 'obsidian';
 import * as fs from 'fs';
 import * as path from 'path';
 import { t } from '../i18n/index';
@@ -55,18 +55,23 @@ function titleFromTurn(user: string): string {
 export class HistoryStore {
   private sessions: SessionRecord[] = [];
   private current: SessionRecord;
-  /** Absolute path to history.json (resolved from the vault root). */
+  /** Absolute path to history.json. */
   private absPath: string;
 
   constructor(
-    private app: App,
-    private file: string,
+    /**
+     * Absolute path to history.json.
+     *
+     * It used to be resolved relative to the vault's base path, which broke as
+     * soon as dsh-home (and with it this file) moved outside the vault: joining
+     * a vault base with an absolute path yields nonsense. Callers now pass the
+     * finished path — the plugin builds it from `paths.ts`.
+     */
+    absPath: string,
     private limit: number,
   ) {
     this.current = this.newSession();
-    const adapter = this.app.vault.adapter as unknown as { getBasePath?: () => string };
-    const base = typeof adapter.getBasePath === 'function' ? adapter.getBasePath() : '';
-    this.absPath = path.join(base, this.file);
+    this.absPath = absPath;
   }
 
   /** Archived sessions: pinned first, then newest first. */

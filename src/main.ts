@@ -1,10 +1,12 @@
 import { Plugin, WorkspaceLeaf, Notice } from 'obsidian';
+import * as path from 'path';
 import { DshSettings, DshSettingTab, normalizeStoredSettings, obsidianLocale, type OptionFieldKey, type PermissionMode } from './settings/index';
 import { ChatView, VIEW_TYPE_CHAT } from './views/chat-view';
 import { SecurityConfirmModal } from './views/modals';
 import { DshClient } from './dsh/dsh-client';
 import { HistoryStore } from './core/history';
-import { pluginPaths } from './dsh/paths';
+import { resolveUserDshHome } from './dsh/paths';
+import { resolvePluginDshHome } from './dsh/dsh-runner';
 import { setLocale, resolveLocale, getLocale, t } from './i18n/index';
 
 export default class DshPlugin extends Plugin {
@@ -25,11 +27,17 @@ export default class DshPlugin extends Plugin {
     await this.loadSettings();
     this.applyLocale();
 
-    // History store: human-readable task history in the plugin DSH_HOME.
-    // Paths come from paths.ts, the single owner of the on-disk layout.
-    const paths = pluginPaths(this.getVaultRoot(), this.app.vault.configDir);
-    const historyFile = paths.dshHomeFile('history.json');
-    this.history = new HistoryStore(this.app, historyFile, this.settings.historyLimit);
+    // History store: the conversation archive. It lives with the plugin's
+    // DSH_HOME outside the vault (see paths.ts), so this is an absolute path.
+    // Same resolution the run path uses (see resolvePluginDshHome), so the
+    // history file the plugin reads is the one it writes — including the legacy
+    // fallback when a migration could not complete.
+    const vaultRoot = this.getVaultRoot();
+    const historyFile = path.join(
+      resolvePluginDshHome(vaultRoot, this.app.vault.configDir, resolveUserDshHome(this.settings.dshHome)),
+      'history.json',
+    );
+    this.history = new HistoryStore(historyFile, this.settings.historyLimit);
     await this.history.load();
 
     // Register chat view

@@ -31,7 +31,7 @@ function makeApp(base: string): App {
 }
 
 function makeHistory(limit: number): HistoryStore {
-  return new HistoryStore(makeApp(tmp), HISTORY_FILE, limit);
+  return new HistoryStore(path.join(tmp, HISTORY_FILE), limit);
 }
 
 function makeTurn(user: string, ts: number): HistoryTurn {
