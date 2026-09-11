@@ -52,7 +52,6 @@ export class ChatView extends ItemView {
   private historyPanel: HTMLElement | null = null;
   private skillPanel: HTMLElement | null = null;
   private skillSuggest: SkillSuggest | null = null;
-  private statusEl: HTMLElement | null = null;
   private statusTimer: number | null = null;
   private statusStartedAt = 0;
   private abortController: AbortController | null = null;
@@ -755,10 +754,10 @@ export class ChatView extends ItemView {
   }
 
   private createStatusElement(): HTMLElement {
-    this.statusEl = this.messagesContainer.createDiv({ cls: 'dsh-status' });
-    this.statusEl.setText(`${t('chat.starting')} …`);
+    const statusEl = this.messagesContainer.createDiv({ cls: 'dsh-status' });
+    statusEl.setText(`${t('chat.starting')} …`);
     this.scrollToBottom();
-    return this.statusEl;
+    return statusEl;
   }
 
   private startStatusTimer(statusEl: HTMLElement): void {
