@@ -119,6 +119,9 @@ export function makePluginDouble(app: ReturnType<typeof makeAppDouble>) {
       dshHome: '',
       workdir: '',
       timeoutSec: 600,
+      // buildTask only injects conversation memory when this is on (it is on
+      // by default in the real plugin).
+      memoryEnabled: true,
       language: 'en',
     },
     history: {

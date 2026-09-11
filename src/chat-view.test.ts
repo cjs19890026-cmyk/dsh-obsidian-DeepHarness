@@ -129,3 +129,75 @@ describe('ChatView toolbar panels', () => {
     expect(document.querySelectorAll('.dsh-history-panel')).toHaveLength(1);
   });
 });
+
+describe('ChatView conversation context', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    appSlot.current = undefined;
+  });
+
+  /** The text the agent is actually spawned with, for the next send. */
+  async function captureNextTaskText(view: ChatView): Promise<string> {
+    const client = (view as unknown as { client: { run(task: string, opts: unknown): Promise<unknown> } }).client;
+    let task = '';
+    client.run = async (t: string): Promise<unknown> => {
+      task = t;
+      return { exitCode: 0, stdout: 'ok', stderr: '', durationMs: 1, killReason: null };
+    };
+    // The run path touches the DOM and the runner; only the task text matters
+    // here, so keep the editor usable and send.
+    // A real message must be in the editor or sendMessage() returns early.
+    (view as unknown as { editor: { setText(t: string): void } }).editor.setText('follow-up question');
+    await (view as unknown as { sendMessage(): Promise<void> }).sendMessage();
+    return task;
+  }
+
+  it('carries earlier turns of the session into the next task', async () => {
+    const view = buildView();
+    await view.onOpen();
+    const memory = (view as unknown as { memory: Array<{ user: string; assistant: string }> }).memory;
+    memory.push({ user: 'What is the capital of France?', assistant: 'Paris.' });
+
+    const task = await captureNextTaskText(view);
+    expect(task).toContain('What is the capital of France?');
+    expect(task).toContain('Paris.');
+  });
+
+  it('rebuilds that context when an archived session is resumed', async () => {
+    // The reported bug: opening a session from the history panel restored the
+    // visible transcript but left the agent with no memory of it, because the
+    // rebuild kept only the first line of each answer, capped at 200 chars.
+    const app = makeAppDouble();
+    appSlot.current = app;
+    const plugin = makePluginDouble(app);
+    const multiLine = `archived first line ${'y'.repeat(250)}\nARCHIVED_SECOND_LINE`;
+    (plugin.history as unknown as Record<string, unknown>).activateSession = async () => ({
+      id: 's1',
+      title: 'Archived',
+      turns: [
+        { ts: 0, user: 'ARCHIVED_USER_TURN', answer: multiLine, durationMs: 0 },
+      ],
+    });
+    const view = new ChatView({} as never, plugin as never);
+    await view.onOpen();
+    await (view as unknown as { resumeSession(s: unknown): Promise<void> }).resumeSession({ id: 's1' });
+
+    const task = await captureNextTaskText(view);
+    expect(task).toContain('ARCHIVED_USER_TURN');
+    expect(task).toContain('ARCHIVED_SECOND_LINE');
+  });
+
+  it('carries a full multi-line answer, not just its first line', async () => {
+    // The bug: memory kept `answer.split('\n')[0].slice(0, 200)`, so everything
+    // after the first line was silently dropped when a session was resumed.
+    const view = buildView();
+    await view.onOpen();
+    const longAnswer = `FIRST_LINE_${'x'.repeat(300)}\nSECOND_LINE_MARKER`;
+    (view as unknown as { memory: unknown[] }).memory.push(
+      { user: 'question', assistant: longAnswer },
+    );
+
+    const task = await captureNextTaskText(view);
+    expect(task).toContain('SECOND_LINE_MARKER');
+  });
+});

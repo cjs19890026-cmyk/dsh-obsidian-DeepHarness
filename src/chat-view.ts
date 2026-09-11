@@ -28,9 +28,51 @@ const QUOTE_FULL_LIMIT = 600;
 /** Longer selections are truncated to this many characters. */
 const QUOTE_TRUNCATE_LIMIT = 300;
 
+/**
+ * Conversation context carried into the next task.
+ *
+ * dsh runs headless and stateless: every task is a fresh process that sees only
+ * the text assembled here (plus the persona and the vault's Harness/memory.md).
+ * That makes this the *only* carrier of in-session context, so what it contains
+ * decides whether a follow-up question — or a resumed session — can build on
+ * earlier turns.
+ *
+ * It used to contain almost nothing: each turn stored just the assistant
+ * answer's first line capped at 200 characters, and the summary took the last 5
+ * turns at 80 characters each (≈800 characters in total). Resuming a session
+ * therefore looked like it worked while actually starting from scratch.
+ */
+const MEMORY_CONTEXT = {
+  /** How many previous turns are carried into one task. */
+  turns: 5,
+  /**
+   * Per-turn character budget: the two together stay around 15k characters —
+   * a few thousand tokens, comfortable even for the smallest supported context
+   * window, and bounded so a long session cannot grow without limit.
+   */
+  userChars: 1500,
+  assistantChars: 2500,
+  /** Turns kept in the in-memory window (history.json keeps the full record). */
+  retainTurns: 20,
+} as const;
+
 interface MemoryTurn {
   user: string;
   assistant: string;
+}
+
+/**
+ * One memory entry, condensed at the only place that matters: from the full
+ * turn text, keeping the head of the user's request and of the assistant's
+ * answer (where the substance of a reply lives — the tail is usually a
+ * trailing list or sign-off). Both sendMessage and resumeSession build memory
+ * through this, so a resumed turn carries exactly what a live one does.
+ */
+function makeMemoryTurn(user: string, answer: string): MemoryTurn {
+  return {
+    user: user.slice(0, MEMORY_CONTEXT.userChars),
+    assistant: answer.slice(0, MEMORY_CONTEXT.assistantChars),
+  };
 }
 
 export class ChatView extends ItemView {
@@ -645,12 +687,10 @@ export class ChatView extends ItemView {
         const answer = parseHeadlessOutput(result.stdout);
         statusEl.setText(`✓ ${t('chat.completed', { duration: String(Math.round(result.durationMs / 1000)) })}`);
         this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, answer);
-        // Remember this turn for the next task
-        this.memory.push({
-          user: message,
-          assistant: answer.split('\n')[0].slice(0, 200),
-        });
-        if (this.memory.length > 20) this.memory.shift();
+        // Remember this turn for the next task (condensed, not first-line-only:
+        // see MEMORY_CONTEXT for why this is the whole context window).
+        this.memory.push(makeMemoryTurn(message, answer));
+        if (this.memory.length > MEMORY_CONTEXT.retainTurns) this.memory.shift();
         // Persist this turn into the current session
         void this.plugin.history?.addTurn({
           ts: Date.now(),
@@ -742,14 +782,21 @@ export class ChatView extends ItemView {
     this.client.stop();
   }
 
-  /** Summarize recent turns into compact bullet lines for context refill. */
+  /**
+   * Carry the recent conversation into the next task.
+   *
+   * This is what makes follow-up questions and resumed sessions work: the agent
+   * has no other memory of earlier turns. Entries are already condensed to
+   * MEMORY_CONTEXT budgets when they are stored, so nothing is re-truncated
+   * here.
+   */
   private buildMemorySummary(): string[] {
     if (this.memory.length === 0) return [];
-    const recent = this.memory.slice(-5);
+    const recent = this.memory.slice(-MEMORY_CONTEXT.turns);
     const lines = [t('chat.memoryHeader')];
     for (const turn of recent) {
-      lines.push(`- ${t('chat.memoryUser')}${turn.user.slice(0, 80)}`);
-      if (turn.assistant) lines.push(`  ${t('chat.memoryAssistant')}${turn.assistant.slice(0, 80)}`);
+      lines.push(`- ${t('chat.memoryUser')}${turn.user}`);
+      if (turn.assistant) lines.push(`  ${t('chat.memoryAssistant')}${turn.assistant}`);
     }
     return [lines.join('\n')];
   }
@@ -1092,19 +1139,21 @@ export class ChatView extends ItemView {
     }
   }
 
-  /** Resume an archived session: re-activate it so new turns append back. */
-  /** Public for HistoryPanel: clicking a session row resumes it. */
+  /** Resume an archived session: re-activate it so new turns append back, and
+   *  rebuild the context the agent needs to continue it. Public for
+   *  HistoryPanel: clicking a session row resumes it. */
   async resumeSession(s: import('./history').SessionRecord): Promise<void> {
     const activated = await this.plugin.history?.activateSession(s.id);
     if (!activated) {
       new Notice(t('chat.resumeFail'));
       return;
     }
-    // Rebuild context memory from the most recent turns (used for refill).
-    this.memory = activated.turns.slice(-20).map((t) => ({
-      user: t.user,
-      assistant: t.answer.split('\n')[0].slice(0, 200),
-    }));
+    // Rebuild the conversation context from the archived turns. Without this the
+    // resumed session would look right but answer as if nothing had been said:
+    // the agent only ever sees what buildMemorySummary() carries into the task.
+    this.memory = activated.turns
+      .slice(-MEMORY_CONTEXT.retainTurns)
+      .map((t) => makeMemoryTurn(t.user, t.answer));
     // Restore the transcript so the conversation is visible again.
     this.messagesContainer.empty();
     for (const t of activated.turns) {
