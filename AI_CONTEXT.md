@@ -82,7 +82,10 @@ MAINTENANCE.md           本地维护日志(被 .gitignore 忽略,不上线)
    - `vault.yml` = persona(用户可编辑;带版本标记 `deepharness-persona-vN`,升级时旧版备份为 `.bak` 后重新生成)
    - `stream-relay.js` + `stream.yml` = 插件管理的流式中继,stdout 输出 `DLEVENT\t<json>`
      事件(think / tool),headless 本身无流式
-5. **内置 obsidian skill**:写入隔离 DSH_HOME 的 `skills/obsidian/`(SKILL.md + references/),
+5. **技能只有一个家**:`~/.dsh/deepharness/<vaultKey>/skills/`(**在 vault 之外**)——本知识库的技能与内置
+   obsidian skill 都在这里;vault 内的 `.dsh/skills`、`.agents/skills` **不再扫描**(2026-09-13 起)。
+   面板来源徽章:内置 / 本知识库 / 自定义目录(设置里注册的外部目录)。
+6. **内置 obsidian skill**:写入隔离 DSH_HOME(即上面那个 `skills/obsidian/`)的 SKILL.md + references/,
    由 DSH 原生 `skill-filesystem`(rank 400 `<dshHome>/skills`)自动发现,agent 用 `skill` 工具加载;
    用户可在 `<vault>/.dsh/skills/obsidian/`(rank 100)放置同名 skill 覆盖
 6. **长期记忆**:`Harness/memory.md`(vault 根),persona/skill 要求 agent 每轮先读、跨会话结论写回
