@@ -516,16 +516,21 @@ export class ChatView extends ItemView {
     const skillDirsPatch = this.runner.ensureSkillDirsPatch(vaultRoot, issues);
     const patchPaths = [patches.persona, patches.think, skillDirsPatch]
       .filter((p): p is string => p !== null);
-    // Built-in obsidian skill + long-term memory seed.
-    this.runner.ensureObsidianSkill(vaultRoot, issues);
-    this.runner.ensureMemoryFile(vaultRoot, issues);
     // Isolated DSH_HOME with the selected model + reasoning effort;
-    // falls back to the user home when it cannot be prepared.
+    // falls back to the user home when it cannot be prepared. Prepared first
+    // because the built-in skill below has to be written *into* it: deriving its
+    // path separately would target the legacy in-vault location and re-create
+    // `dsh-home/` inside the vault.
     const pluginHome = this.runner.ensurePluginDshHome(vaultRoot, {
       model: this.plugin.settings.model,
       effort: this.plugin.settings.reasoningEffort,
     }, issues);
     const dshHome = pluginHome ?? this.runner.dshHome();
+    // Built-in obsidian skill + long-term memory seed. The skill goes into the
+    // prepared DSH_HOME (system location, or the legacy fallback), where DSH's
+    // own skill-filesystem discovers it.
+    this.runner.ensureObsidianSkill(vaultRoot, issues, dshHome);
+    this.runner.ensureMemoryFile(vaultRoot, issues);
     // Guardrail: the plugin's DSH_HOME must never live inside the vault. It used
     // to, and that made DSH bootstrap its headless profile (400+ symlinks, or
     // tens of thousands of files on Windows) inside a synced folder — the iCloud

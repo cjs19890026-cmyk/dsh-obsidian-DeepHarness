@@ -671,9 +671,19 @@ export class DshRunner {
    *
    * Returns the skill directory, or null on failure / when disabled.
    */
-  ensureObsidianSkill(vaultRoot: string, issues?: PreparationIssue[]): string | null {
+  ensureObsidianSkill(
+    vaultRoot: string,
+    issues?: PreparationIssue[],
+    /** The DSH_HOME in use, as returned by {@link ensurePluginDshHome}. Passed
+     *  in rather than derived: `pluginHomeDir()` points at the *legacy* in-vault
+     *  location, so deriving it here re-created `dsh-home/skills/` inside the
+     *  vault on every run — exactly the synced-folder problem the migration
+     *  exists to remove. Defaults to the legacy path only so the existing
+     *  signature keeps working for callers that do not prepare a home. */
+    dshHome: string = this.pluginHomeDir(vaultRoot),
+  ): string | null {
     if (!this.settings.obsidianSkill) return null;
-    const skillRoot = path.join(this.pluginHomeDir(vaultRoot), 'skills');
+    const skillRoot = path.join(dshHome, 'skills');
     const fail = (): null => {
       issues?.push({
         level: 'warning',

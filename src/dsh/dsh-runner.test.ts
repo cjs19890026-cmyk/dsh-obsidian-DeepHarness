@@ -467,6 +467,30 @@ describe('DshRunner preparation degradation reporting (P1-3)', () => {
     expect(fs.existsSync(path.join(legacy, 'history.json'))).toBe(true);
   });
 
+  it('writes the built-in skill into the prepared home, never back into the vault', () => {
+    // Regression: ensureObsidianSkill derived its target from pluginHomeDir(),
+    // which is the *legacy* in-vault path — so every run re-created
+    // `<vault>/…/dsh-home/skills/obsidian`, undoing the migration that had just
+    // moved that whole tree out of the synced folder.
+    const home = runner.ensurePluginDshHome(
+      vaultRoot,
+      { model: 'deepseek-flash', effort: 'high' },
+      undefined,
+      userHome,
+    );
+    const dir = runner.ensureObsidianSkill(
+      vaultRoot,
+      undefined,
+      home as string,
+    );
+    expect(dir).not.toBeNull();
+    expect((dir as string).startsWith(home as string)).toBe(true);
+    expect(fs.existsSync(path.join(home as string, 'skills', 'obsidian', 'SKILL.md'))).toBe(true);
+    // The vault must stay free of any dsh-home tree.
+    expect(fs.existsSync(path.join(vaultRoot, '.obsidian', 'plugins', 'deepharness', 'dsh-home')))
+      .toBe(false);
+  });
+
   it('does not copy the bootstrap profile cache during migration', () => {
     // profiles/ is DSH's own cache (400+ symlinks on macOS, tens of thousands
     // of files on Windows) and DSH rebuilds it. Copying it would be the slowest
