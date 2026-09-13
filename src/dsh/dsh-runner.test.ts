@@ -369,6 +369,26 @@ describe('DshRunner preparation degradation reporting (P1-3)', () => {
     expect(codes(issues)).toContain('skill-dirs-rejected');
   });
 
+  it('removes a stale skill-dirs patch when the setting is cleared', () => {
+    // Found in the wild: extraSkillDirs emptied, but the patch written by a
+    // previous run survived and kept pointing DSH at a vault folder that holds
+    // no skills. Nothing to register must mean nothing registered.
+    settings.extraSkillDirs = 'Skills';
+    const written = runner.ensureSkillDirsPatch(vaultRoot);
+    expect(written).not.toBeNull();
+    expect(fs.existsSync(written as string)).toBe(true);
+
+    settings.extraSkillDirs = '';
+    expect(runner.ensureSkillDirsPatch(vaultRoot)).toBeNull();
+    expect(fs.existsSync(written as string)).toBe(false);
+  });
+
+  it('is idempotent when there was never a patch to remove', () => {
+    settings.extraSkillDirs = '';
+    expect(runner.ensureSkillDirsPatch(vaultRoot)).toBeNull();
+    expect(runner.ensureSkillDirsPatch(vaultRoot)).toBeNull();
+  });
+
   it('returns null + an issue when every extra skill dir is rejected', () => {
     settings.extraSkillDirs = '../a, /etc';
     const issues: PreparationIssue[] = [];

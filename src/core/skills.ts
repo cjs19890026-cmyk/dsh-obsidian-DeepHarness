@@ -19,8 +19,15 @@ export interface SkillEntry {
   name: string;
   /** One-line catalog description shown in the panel. */
   description: string;
-  /** Where the skill came from (dedupe priority + badge in the UI). */
-  source: 'project' | 'extra' | 'plugin';
+  /**
+   * Where the skill came from (dedupe priority + badge in the UI).
+   *
+   *  - `builtin`: shipped by the plugin (the obsidian skill), in its DSH_HOME
+   *  - `vault`:   a skill stored for this vault, in that same DSH_HOME's
+   *               `skills/` — the one place vault-scoped skills live
+   *  - `custom`:  a folder the user registered in settings, outside the vault
+   */
+  source: 'vault' | 'custom' | 'builtin';
   /** Absolute directory of the skill (resource base). */
   dir: string;
 }
@@ -98,13 +105,15 @@ const KEBAB = /^[a-z0-9][a-z0-9-]*$/;
 /**
  * Validate, dedupe and sort raw discovered skills. Rules mirror DSH:
  * kebab-case name + non-empty description required; on duplicate names the
- * higher-priority source wins (project .dsh/.agents > extra dirs > plugin).
+ * higher-priority source wins (builtin > custom dirs > vault).
  */
 export function normalizeSkillEntries(raw: RawSkill[]): SkillEntry[] {
+  // A built-in skill is authoritative for its own name (it is the plugin's own
+  // tooling contract), then an explicitly configured folder, then the vault.
   const priority: Record<SkillEntry['source'], number> = {
-    project: 0,
-    extra: 1,
-    plugin: 2,
+    builtin: 0,
+    custom: 1,
+    vault: 2,
   };
   const byName = new Map<string, SkillEntry>();
   for (const r of raw) {

@@ -286,3 +286,47 @@ describe('ChatView.prepareRun (extracted preparation phase)', () => {
     expect(prep.ok).toBe(false);
   });
 });
+
+describe('skill discovery roots', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '';
+    appSlot.current = undefined;
+  });
+
+  /**
+   * Skills for a vault live in exactly one place: the plugin's DSH_HOME
+   * (`~/.dsh/deepharness/<vaultKey>/skills`, outside the vault), which also
+   * holds the built-in obsidian skill. Scanning the vault's own `.dsh/skills`
+   * and `.agents/skills` was removed because it made "where do I put a skill?"
+   * ambiguous and kept skill files inside synced folders.
+   */
+  it('scans the plugin DSH_HOME and nothing inside the vault', async () => {
+    const view = buildView();
+    await view.onOpen();
+    const roots = (view as unknown as {
+      scanRoots(v: string): Array<{ dir: string; source: string }>;
+    }).scanRoots('/tmp/some-vault');
+
+    const vaultRoot = (view as unknown as { plugin: { getVaultRoot(): string } }).plugin.getVaultRoot();
+    expect(roots.length).toBeGreaterThan(0);
+    for (const root of roots) {
+      expect(root.dir.startsWith(vaultRoot)).toBe(false);
+    }
+    // The vault-scoped root carries its own source so the panel can label it.
+    expect(roots.some((r) => r.source === 'vault')).toBe(true);
+  });
+
+  it('includes vault-scoped skills registered from settings as custom roots', async () => {
+    const view = buildView();
+    await view.onOpen();
+    const settings = (view as unknown as { plugin: { settings: Record<string, unknown> } }).plugin.settings;
+    settings.extraSkillDirs = 'Harness';
+    const roots = (view as unknown as {
+      scanRoots(v: string): Array<{ dir: string; source: string }>;
+    }).scanRoots((view as unknown as { plugin: { getVaultRoot(): string } }).plugin.getVaultRoot());
+
+    // Custom dirs are vault-internal by design (containment-checked elsewhere),
+    // and must still be labelled separately from the vault skills folder.
+    expect(roots.some((r) => r.source === 'custom' && r.dir.endsWith('Harness'))).toBe(true);
+  });
+});

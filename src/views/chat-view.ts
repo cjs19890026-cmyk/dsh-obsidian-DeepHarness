@@ -1,3 +1,4 @@
+import * as fs from 'fs';
 import * as path from 'path';
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, setIcon, Menu, MarkdownView, Keymap } from 'obsidian';
 import type DshPlugin from '../main';
@@ -1250,24 +1251,28 @@ export class ChatView extends ItemView {
   /** Public for SkillPanel: localized label for a skill's source badge. */
   skillSourceLabel(source: SkillEntry['source']): string {
     switch (source) {
-      case 'project': return t('chat.skillSourceProject');
-      case 'extra': return t('chat.skillSourceExtra');
-      case 'plugin': return t('chat.skillSourcePlugin');
+      case 'builtin': return t('chat.skillSourceBuiltin');
+      case 'vault': return t('chat.skillSourceVault');
+      case 'custom': return t('chat.skillSourceCustom');
     }
   }
 
   /** Roots mirroring DSH discovery + user-configured extra directories. */
   private scanRoots(vaultRoot: string): ScanRoot[] {
+    // One home for vault-scoped skills, outside the vault: the plugin's DSH_HOME
+    // (`~/.dsh/deepharness/<vaultKey>/skills`). It used to be scattered across
+    // `<vault>/.dsh/skills`, `<vault>/.agents/skills` and the plugin folder,
+    // which made "where do I put a skill?" unclear and put skill files inside
+    // synced folders. The built-in obsidian skill lives here too, in its own
+    // subfolder, so the panel and DSH's own skill-filesystem see one tree.
     const roots: ScanRoot[] = [
-      { dir: path.join(vaultRoot, '.dsh', 'skills'), source: 'project' },
-      { dir: path.join(vaultRoot, '.agents', 'skills'), source: 'project' },
-      { dir: path.join(this.runner.pluginHomeDir(vaultRoot), 'skills'), source: 'plugin' },
+      { dir: path.join(this.runner.pluginDshHome(vaultRoot), 'skills'), source: 'vault' },
     ];
     for (const rel of this.plugin.settings.extraSkillDirs.split(',')) {
       // Only vault-internal relative directories are scanned: absolute paths
       // and `../` escapes are rejected (see resolveVaultRelativeDir).
       const dir = resolveVaultRelativeDir(vaultRoot, rel);
-      if (dir) roots.push({ dir, source: 'extra' });
+      if (dir) roots.push({ dir, source: 'custom' });
     }
     return roots;
   }
@@ -1281,8 +1286,19 @@ export class ChatView extends ItemView {
    *  never triggers its own filesystem walk. */
   scanSkills(): SkillEntry[] {
     const vaultRoot = this.plugin.getVaultRoot();
-    // Key covers every input of the scan; cheap to compute per call.
-    const key = `${vaultRoot}\u0000${this.plugin.settings.extraSkillDirs.trim()}`;
+    // Key covers every input of the scan; cheap to compute per call. It must
+    // include each root's *contents*: the vault skills folder is the one users
+    // add skills to, and nothing in settings changes when they do, so a key of
+    // settings alone kept the panel stale until a reload.
+    const rootDirs = this.scanRoots(vaultRoot).map((r) => r.dir);
+    const contents = rootDirs.map((dir) => {
+      try {
+        return `${dir}:${fs.readdirSync(dir).sort().join(',')}`;
+      } catch {
+        return `${dir}:missing`; // not created yet is a valid state
+      }
+    }).join('\u0000');
+    const key = `${vaultRoot}\u0000${this.plugin.settings.extraSkillDirs.trim()}\u0000${contents}`;
     if (this.skillCache && this.skillCache.key === key) return this.skillCache.skills;
     const skills = scanSkillRoots(this.scanRoots(vaultRoot));
     this.skillCache = { key, skills };

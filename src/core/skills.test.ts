@@ -28,11 +28,11 @@ describe('extractSkillFields', () => {
 
 describe('normalizeSkillEntries', () => {
   const raw: RawSkill[] = [
-    { name: 'good-skill', description: 'd', dir: '/a', source: 'plugin' },
-    { name: 'Bad Name', description: 'd', dir: '/a', source: 'plugin' },
-    { name: 'no-desc', description: '   ', dir: '/a', source: 'plugin' },
-    { name: 'dup', description: 'from project', dir: '/p', source: 'project' },
-    { name: 'dup', description: 'from plugin', dir: '/pl', source: 'plugin' },
+    { name: 'good-skill', description: 'd', dir: '/a', source: 'builtin' },
+    { name: 'Bad Name', description: 'd', dir: '/a', source: 'builtin' },
+    { name: 'no-desc', description: '   ', dir: '/a', source: 'builtin' },
+    { name: 'dup', description: 'from vault', dir: '/p', source: 'vault' },
+    { name: 'dup', description: 'from builtin', dir: '/pl', source: 'builtin' },
   ];
 
   it('drops non-kebab names and empty descriptions (mirrors DSH)', () => {
@@ -43,7 +43,8 @@ describe('normalizeSkillEntries', () => {
 
   it('higher-priority source wins duplicate names', () => {
     const out = normalizeSkillEntries(raw);
-    expect(out.find((e) => e.name === 'dup')?.description).toBe('from project');
+    // builtin (the plugin's own tooling contract) outranks the vault entry.
+    expect(out.find((e) => e.name === 'dup')?.description).toBe('from builtin');
   });
 
   it('sorts by name', () => {
@@ -70,20 +71,20 @@ describe('scanSkillRoots', () => {
     fs.writeFileSync(path.join(tmp, 'flat.md'), '---\nname: flat-skill\ndescription: 一个扁平技能\n---\n');
     fs.writeFileSync(path.join(tmp, 'invalid.md'), '---\nname: 中文名\ndescription: 会被跳过\n---\n');
 
-    const out = scanSkillRoots([{ dir: tmp, source: 'project' }]);
+    const out = scanSkillRoots([{ dir: tmp, source: 'vault' }]);
     expect(out.map((e) => e.name)).toEqual(['bundle-skill', 'flat-skill']);
   });
 
   it('treats missing roots as an empty state', () => {
-    expect(scanSkillRoots([{ dir: path.join(tmp, 'nope'), source: 'extra' }])).toEqual([]);
+    expect(scanSkillRoots([{ dir: path.join(tmp, 'nope'), source: 'custom' }])).toEqual([]);
   });
 });
 
 describe('filterSkillEntries', () => {
   const skills = [
-    { name: 'weekly-review', description: '每周执行一次的信息系统维护仪式', source: 'extra' as const, dir: '/x' },
-    { name: 'para-system', description: '信息应该放哪里的分类体系', source: 'extra' as const, dir: '/x' },
-    { name: 'obsidian', description: 'Obsidian vault 操作约定与官方 CLI 用法', source: 'plugin' as const, dir: '/x' },
+    { name: 'weekly-review', description: '每周执行一次的信息系统维护仪式', source: 'custom' as const, dir: '/x' },
+    { name: 'para-system', description: '信息应该放哪里的分类体系', source: 'custom' as const, dir: '/x' },
+    { name: 'obsidian', description: 'Obsidian vault 操作约定与官方 CLI 用法', source: 'builtin' as const, dir: '/x' },
   ];
 
   it('matches by name (case-insensitive)', () => {

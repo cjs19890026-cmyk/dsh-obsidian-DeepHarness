@@ -496,7 +496,20 @@ export class DshRunner {
    * Returns the plugin home, or null on failure (caller falls back to the
    * user home, where the model dropdown is then ignored).
    */
-  /** Absolute path of the plugin-owned DSH_HOME inside the vault. */
+  /**
+   * The DSH_HOME the plugin actually uses: the system location, or the legacy
+   * in-vault tree when a migration could not complete (see
+   * {@link resolvePluginDshHome}). Read-only — use {@link ensurePluginDshHome}
+   * to prepare it.
+   */
+  pluginDshHome(vaultRoot: string): string {
+    return resolvePluginDshHome(vaultRoot, this.configDir, this.dshHome());
+  }
+
+  /**
+   * The **legacy** in-vault DSH_HOME. Never a target for new files: it exists
+   * only so the migration can find and roll back to an old tree.
+   */
   pluginHomeDir(vaultRoot: string): string {
     return pluginPaths(vaultRoot, this.configDir).dshHomeDir;
   }
@@ -773,9 +786,21 @@ export class DshRunner {
         message: t('chat.degrade.skillDirsRejected', { dirs: rejected.join(', ') }),
       });
     }
-    if (dirs.length === 0) return null;
     const dir = pluginPaths(vaultRoot, this.configDir).generatedDir;
     const file = path.join(dir, 'skill-dirs.yml');
+    if (dirs.length === 0) {
+      // Nothing to register — and the patch file from a previous run has to go,
+      // or DSH keeps scanning a folder the user has since removed from
+      // settings. (Found in the wild: an empty `extraSkillDirs` with a stale
+      // patch still pointing DSH at the vault's Harness folder, which holds
+      // memory.md, not skills.)
+      try {
+        fs.rmSync(file, { force: true });
+      } catch {
+        // Best effort: a leftover patch only costs a pointless scan.
+      }
+      return null;
+    }
     try {
       fs.mkdirSync(dir, { recursive: true });
       fs.chmodSync(dir, 0o755);
