@@ -17,6 +17,7 @@ import { HistoryPanel } from './history-panel';
 import { SkillPanel } from './skill-panel';
 import { t, type TranslationKey } from '../i18n/index';
 import { isInside } from '../dsh/paths';
+import { OBSIDIAN_SKILL_NAME } from '../core/obsidian-skill';
 import { NoteCreatorModal } from './modals';
 
 export const VIEW_TYPE_CHAT = 'deepharness-chat';
@@ -1300,7 +1301,12 @@ export class ChatView extends ItemView {
     }).join('\u0000');
     const key = `${vaultRoot}\u0000${this.plugin.settings.extraSkillDirs.trim()}\u0000${contents}`;
     if (this.skillCache && this.skillCache.key === key) return this.skillCache.skills;
-    const skills = scanSkillRoots(this.scanRoots(vaultRoot));
+    const skills = scanSkillRoots(this.scanRoots(vaultRoot))
+      // The built-in obsidian skill lives in the same folder as this vault's
+      // skills (one tree, one answer to "where do my skills go"), so it has to
+      // be re-labelled here or the panel would present the plugin's own skill as
+      // something the user wrote.
+      .map((s) => (s.name === OBSIDIAN_SKILL_NAME ? { ...s, source: 'builtin' as const } : s));
     this.skillCache = { key, skills };
     return skills;
   }
