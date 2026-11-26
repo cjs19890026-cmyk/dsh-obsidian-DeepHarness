@@ -42,7 +42,7 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 
 目标：把运行生命周期做成可测试、可恢复的状态机；修掉“准备失败卡 running”这类信任问题。**这个版本可以没有新功能，但必须让后续功能有地基。**
 
-### R1. RunController 显式状态机（P0）— in progress（代码+单测完成，真实 UI 手工待）
+### R1. RunController 显式状态机（P0）— done（2026-11-26，真实 UI 手测通过）
 
 - 实际模块：`src/views/run-controller.ts`（不是 `src/dsh/`）。
 - 状态：`idle / preparing / running / succeeded / failed / cancelled / timedOut`。
@@ -54,6 +54,7 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
   - 成功/失败/取消/超时四条主链路测试通过；
   - 关闭视图路径由 `shutdownForUnload` + `savePartialTurn` 覆盖（非 DOM 写入）。
 - 未做：把 client/stream/history 也并入 controller；当前是刻意轻量实现。
+- 2026-11-26 用户真实 UI 手测通过；发送/停止/恢复 Send 正常。
 
 ### R2. 主链路替身测试（P0）— done
 
@@ -75,25 +76,25 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 
 ## 5. Next — 0.2.0「在笔记里工作」
 
-> F1/F2 已实现（见下），0.2.0 剩余 F3/F4 与真实 vault 验收；已完成条目保留作验收记录。
+> F1/F2 已完成并手测通过；0.2.0 剩余 F3/F4。已完成条目保留作验收记录。
 
 目标：让用户不打开聊天框也能用 agent，并且改动可见、可撤销。
 
-### F1. 选区动作（P0）— in progress（代码+自动测试完成，真实 vault 手工待）
+### F1. 选区动作（P0）— done（2026-11-26，真实 vault 手测通过）
 
 - 命令：`ask-selection`（`DeepHarness: 处理选中文本`；无选区时提示）。
 - 动作：改写 / 总结 / 解释 / 自定义指令。
 - 流程：选中 → 动作 → **预览**（diff 或并排）→ 应用/取消；取消不动原文件。
 - 验收：三种动作在真实 vault 走通；取消后文件字节不变；有 DOM/命令测试。
-- 2026-11-26 状态：`src/views/selection-modals.ts` + `ChatView.beginSelectionAction` + `main.ts` 命令已实现；3 个流测试通过；**尚未在真实 vault 手工走 Replace/Insert**。
+- 2026-11-26 状态：`src/views/selection-modals.ts` + `ChatView.beginSelectionAction` + `main.ts` 命令已实现；3 个流测试通过；用户真实 vault 手测 Replace/Insert/取消通过。
 - 依赖：无（可与 R1 并行，但 ChatView 改动需排队）。
 
-### F2. 变更审阅与撤销（P0）— in progress（MVP，自动测试完成，真实 vault 手工待）
+### F2. 变更审阅与撤销（P0）— done（2026-11-26，真实 vault 手测通过）
 
 - 运行前 `snapshotVault()` 只读 Markdown（上限 2000 文件 / 512KB / 64MB，超限提示 incomplete）；运行后 `diffSnapshots()`。
 - 有变更时打开 `ChangeReviewModal`：逐文件路径 + created/modified/deleted + 紧凑 `-/+` diff；逐文件撤销 / 全部撤销 / 保留。
 - 无 git vault 也工作；二进制/大文件跳过并明确提示；选区运行跳过审阅（避免与预览双 modal）。
-- 验收：7 个 tracker 单测 + 4 个 modal 单测 + 1 个 ChatView 集成测试通过；**尚未在临时 vault 真改 3 个文件走撤销**。
+- 验收：7 个 tracker 单测 + 4 个 modal 单测 + 1 个 ChatView 集成测试通过；2026-11-26 用户在真实 vault 手测逐文件/全部撤销通过。
 - 已知限制：diff 是公共前后缀 + 单块，不覆盖分散多处编辑；运行前全量读 Markdown 的耗时待真实 vault 观察。
 
 ### F3. 运行历史/审计（P1）
@@ -166,16 +167,15 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 1. **0.1.9 不发布**：R1/R2/F1/F2 作为内部里程碑，合并后随 0.2.0 发布；不 bump manifest、不打 tag。
 2. **变更审阅**：采用“运行后快照 diff + 显式撤销”；预写确认暂不做（headless 无 answerer）。
 3. **并行方式**：Runtime 先做 R1/R2；Workflow UX 后动 ChatView；Research 只做 spike。
+4. **F1/F2 验收**：2026-11-26 用户真实 vault 手测通过（选区 Replace/Insert/取消、逐文件/全部撤销）。
 
 仍待用户决定：
 
-1. **F1/F2 的真实 vault 验收**：是否现在安排一次手工测试（选区 Replace/Insert、改 3 个文件后撤销）？
-   - 建议：push 后在测试 vault 走一遍；发现问题按 hotfix 处理。
-2. **批量范围**：先做“文件夹批处理”，还是“多选笔记”？
+1. **批量范围**：先做“文件夹批处理”，还是“多选笔记”？
    - 建议：先多选笔记（可控、易验收），文件夹批次放后面。
-3. **会话连续性**：愿意为原生 session 投入自定义 runner/profile 吗？
+2. **会话连续性**：愿意为原生 session 投入自定义 runner/profile 吗？
    - 建议：先 spike，不预先承诺；如果成本高，保持“记忆 + transcript 恢复”。
-4. **大 vault 的审阅成本**：是否加设置开关/按 workdir 缩小快照范围？
+3. **大 vault 的审阅成本**：是否加设置开关/按 workdir 缩小快照范围？
    - 建议：先观察真实耗时，再决定；默认保留 2000 文件/512KB/64MB 上限。
 
 ## 10. 状态与更新规则
@@ -196,3 +196,4 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 | 2026-11-26 | 0.1.9 不发布；R1/R2/F1/F2 合并后随 0.2.0 发布 | 用户决定暂不发版；先把可靠性/工作流做完再给用户可见版本 |
 | 2026-11-26 | RunController 放 `src/views/`，只持有状态 + AbortSignal | 不扩大改动面；client/stream/history 仍由 ChatView 编排，先修 stuck-Stop |
 | 2026-11-26 | 变更审阅采用运行前后 Markdown 快照，直接实现为 F2 | git 模式只覆盖 git vault；工具事件拿不到写前内容；只读模式不能替代撤销 |
+| 2026-11-26 | `feat/trusted-run-and-selection` 手测通过后合入 `main` | R1/R2/F1/F2 四项验证 + 真人测试通过；0.2.0 从 main 继续 |
