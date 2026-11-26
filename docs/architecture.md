@@ -48,7 +48,11 @@ DSH child process
 | 路径 | 职责 | 不该做什么 |
 |---|---|---|
 | `src/main.ts` | 插件生命周期、命令、设置页、权限二次确认、打开/聚焦 chat view | 不直接 spawn、不拼 DSH 参数 |
-| `src/views/chat-view.ts` | 会话 UI、发送/停止、流式渲染、记忆、历史写入、恢复会话 | 不应长期承担 RunController（见 §8） |
+| `src/views/chat-view.ts` | 会话编排：发送/停止、流式渲染、记忆、历史写入、恢复会话；调用 `RunController` | 不拥有状态机；不直接写 DSH 配置 |
+| `src/views/run-controller.ts` | 单次运行的状态机：`idle/preparing/running/终态`、`AbortController`、stale-handle 防护 | 不 spawn、不渲染、不碰 Obsidian |
+| `src/views/selection-modals.ts` | 选区动作选择与结果预览；只有用户点按钮才 apply | 不直接改笔记（apply 回调由 `main.ts` 提供） |
+| `src/views/change-review-modal.ts` | 运行后变更列表、逐文件 diff、显式撤销 | 不自动回滚 |
+| `src/core/change-tracker.ts` | 运行前后 Markdown 快照、diff、撤销；大小/数量上限 | 不读二进制、不碰 UI |
 | `src/dsh/dsh-runner.ts` | 任务前准备：detect bin/node、DSH_HOME 迁移与写入、workdir、persona、stream relay、obsidian skill、memory seed、skill-dirs patch、task 组装 | 不 spawn、不碰 Obsidian UI |
 | `src/dsh/dsh-client.ts` | 唯一 spawn 点：参数/env、stdio 行解析入口、超时、abort、SIGTERM→SIGKILL、进程注册表 | 不做 UI、不读设置页 |
 | `src/dsh/pure.ts` | 无 Obsidian 依赖的纯函数：DLEVENT 解析、npm shim 解析、headless 输出清洗、错误码映射 | 不读写文件 |
@@ -62,7 +66,7 @@ DSH child process
 | `src/i18n/index.ts` | en/zh 文案与 `t()` | 不放业务状态 |
 | `src/views/*` | 面板、弹窗、mention、chip editor 等 UI 组件 | 不拥有运行生命周期 |
 
-依赖方向：`views → dsh/core/settings/i18n`，`dsh → core/i18n`，`core → i18n`。已知反向依赖：`dsh-runner.ts` 从 `settings/index.ts` 取类型，`chat-view.ts` 从 `settings/index.ts` 取 option 常量；理想是 `settings/types.ts` + `settings/validate.ts`，见 §8。
+依赖方向：`views → dsh/core/settings/i18n`，`dsh → core/i18n`，`core → i18n`。已知反向依赖：`dsh-runner.ts` 从 `settings/index.ts` 取类型，`chat-view.ts` 从 `settings/index.ts` 取 option 常量；理想是 `settings/types.ts` + `settings/validate.ts`，见 §10。
 
 ## 4. 磁盘布局
 
@@ -101,49 +105,39 @@ DSH child process
 
 ## 5. 一次运行的完整生命周期
 
-1. **触发**：用户点发送，或命令 “Process current note” 预填输入（`setPendingInput`，仍需用户发送）。
-2. **同步门禁**：`running` 为真则拒绝；否则清空编辑器、渲染 user 消息、置 `running=true`、创建 `AbortController`、按钮变 Stop。
-3. **准备（`prepareRun`）**：
-   - `detectBin()` / `detectNode()` / `resolveDshScript()`；
-   - `buildTask()`（memory + 用户消息）；
-   - `ensureVaultPatch()`（persona + relay）；
-   - `ensureSkillDirsPatch()`；
-   - `ensurePluginDshHome()`（迁移、settings.yaml、凭据）；
-   - `ensureObsidianSkill()` / `ensureMemoryFile()`；
-   - `workdir()`（空 = vault root；越界/不可写则降级并收集 issue）；
-   - `isInside(dshHome, vaultRoot)` 守卫。
-   - 任一硬失败：渲染 setup error + Notice，**不 spawn**。
-   - 准备降级（写失败、回退）：收集 `PreparationIssue[]`，运行前一次性展示。
-4. **执行（`DshClient.run`）**：传 `task/cwd/dshHome/apiKey/provider/toolsMode/permissionMode/patchPath/timeoutMs/signal/onStdoutLine`；子进程注册；超时/abort 触发 kill。
-5. **流式**：stdout 逐行 → `parseDshEventLine` → thinking 累积 / tool 行创建与更新；最终 answer = `parseHeadlessOutput(stdout)`（去掉所有 DLEVENT 行）。
-6. **收尾**：按 `killReason` / exitCode / stdout 分四种 UI 结果；成功时写 memory + history；失败/取消/超时也尽量保留可见状态；`finally` 重置 `running`、`abortController`、按钮。
-7. **视图销毁**：`onClose` / `shutdownForUnload` 置 `closed=true`、abort、持久化当前会话；之后任何异步回调不得再碰 DOM，只能 `savePartialTurn`。
-
-**已知缺陷**：步骤 3 硬失败时直接 `return`，没有回到 `finally`，会留下 `running=true` 与 Stop 按钮，直到用户再点一次 Stop。这正是需要显式状态机的原因之一。
+1. **触发**：用户点发送；或 “Process current note” 预填输入（`setPendingInput`，仍需用户发送）；或 `ask-selection` 命令先选动作，再自动发送选区 prompt。
+2. **同步门禁**：`RunController.canStart()` 为真才继续；`start()` 置 `preparing`、新建 `AbortController`，清编辑器、渲染 user 消息、按钮变 Stop。第二个发送在 active 状态被拒绝并提示 busy。
+3. **准备（`prepareRun`）**：探测 bin/node/script、组装 task、写 vault patch / skill-dirs / 插件 DSH_HOME、种子技能与 memory、解析 workdir。硬失败 → `run.fail()` 并清选区请求；降级问题收集为 `PreparationIssue[]`，运行前一次性展示。
+4. **运行前快照（F2）**：非选区运行先 `snapshotVault()`（仅 Markdown，默认最多 2000 个文件、单文件 512KB、总计 64MB；超限标记 incomplete）。选区运行跳过，避免与预览弹窗叠加。
+5. **执行（`DshClient.run`）**：传 `task/cwd/dshHome/apiKey/provider/toolsMode/permissionMode/patchPath/timeoutMs/signal/onStdoutLine`；child 注册；超时/abort 触发 kill。`RunController.markRunning()` 只在 `preparing` 且 handle 仍当前时成功。
+6. **流式**：stdout 逐行 → `parseDshEventLine` → thinking 累积 / tool 行创建与更新；最终 answer = `parseHeadlessOutput(stdout)`（去掉所有 DLEVENT 行）。
+7. **收尾**：按 `closed` / `killReason` / exitCode / stdout 分成功、用户取消、超时、失败、关闭五种路径，分别调用 `run.succeed/cancel/timeout/fail`；成功时写 memory + history；失败/取消/超时也尽量保留可见状态。
+8. **运行后审阅（F2）**：非选区运行重新快照、`diffSnapshots()`，有变更则打开 `ChangeReviewModal`；撤销是显式按钮，不会自动回滚。选区运行改为 `showSelectionPreview()`，用户点 Replace / Insert below 后才写回。
+9. **清理**：`sendMessage` 的 `finally` 调 `run.finish(handle)`；无论 prepare 失败、异常、取消、超时还是成功，都回 `idle` 并恢复 Send 按钮。
+10. **视图销毁**：`onClose` / `shutdownForUnload` 置 `closed=true`、`run.dispose()`、持久化当前会话；之后任何异步回调不得再碰 DOM，只能 `savePartialTurn`。
 
 ## 6. 状态机：现状与目标
 
-**现状**：`ChatView` 用四个字段表达生命周期：
-
-- `running: boolean`
-- `abortController: AbortController | null`
-- `statusTimer: number | null`
-- `closed: boolean`（销毁闩锁）
-
-状态是**推导出来的**（按钮文案、status 行、`running`），没有唯一状态变量；准备失败、取消、超时、子进程异常退出之间靠分支约定。后果是容易出现“按钮/状态/子进程不一致”，且无法重放或做集成测试。
-
-**目标（0.1.9）**：引入 `RunController`，显式状态：
+**现状（2026-11-26 起）**：`src/views/run-controller.ts` 是单次运行的显式状态机，`ChatView` 持有一个实例：
 
 ```
-idle ──prepare──▶ preparing ──spawn──▶ running
-  ▲                    │                  ├─▶ succeeded
-  │                    │                  ├─▶ failed
-  │                    │                  ├─▶ cancelled
-  │                    │                  └─▶ timedOut
-  └────────────────────┴──────────────────（cleanup 后回 idle）
+idle ──start──▶ preparing ──markRunning──▶ running
+  ▲                   │                      ├─▶ succeeded
+  │                   │                      ├─▶ failed
+  │                   │                      ├─▶ cancelled
+  │                   │                      └─▶ timedOut
+  └───────────────────┴──────── finish() ────（所有终态回 idle）
 ```
 
-`RunController` 持有：当前状态、`AbortController`、超时 timer、child 句柄（经 `DshClient`）、部分输出、历史写入所需的元数据。它对外发事件（state / stream / tool / done），`ChatView` 只订阅并渲染。硬约束：**任何路径（包括 prepare 失败）都必须经过 cleanup 回到 idle**。
+- `start()` 只允许从 `idle` 出发，返回带 `id` 与 `AbortSignal` 的 `RunHandle`；重复 start 返回 null。
+- `markRunning()` 只允许 `preparing → running`；`succeed()` 只允许从 `running`；`fail()/cancel()` 接受任意 active 状态；`timeout()` 只允许从 `running`。
+- `cancel()/timeout()` 立即 abort；`finish(handle)` 与终态分离，调用方在 `finally` 里无条件调用，终态或 active 状态都回 `idle`。
+- **stale handle 防护**：旧 run 的 handle 不能改变新 run 的状态；`isCurrent()` 在所有异步边界检查。
+- `dispose()` 用于视图销毁：abort 并直接回 `idle`，不等待 run promise。
+
+**职责边界**：controller 只拥有状态与取消，不 spawn、不渲染、不持超时 timer。超时由 `DshClient` 的 `timeoutMs` 执行，结果用 `killReason: 'timeout'` 回来；`ChatView` 仍负责编排、DOM、memory 与 history。这是有意的轻量实现——把 client/stream/历史也塞进去会扩大改动面，留到后续按需演进。
+
+**与旧实现的关键差异**：不再有 `running` boolean 与公开的 `abortController` 字段；prepare 失败路径由 `sendMessage` 的 `finally` 统一恢复按钮，这是“卡 Stop”缺陷的修复。
 
 ## 7. 事件协议
 
@@ -176,24 +170,27 @@ DLEVENT\t{"t":"tool","status":"result","id":"...","ok":true,"summary":"..."}
 | 纯函数 (`pure.ts`, `paths.ts`, `dsh-config.ts`) | 已有单测 | Node 直接测，不需要 Obsidian |
 | `DshClient` | 已有注入/替身测试 | 假 child、假 stdout、超时/abort |
 | `DshRunner` | 文件系统测试 + temp home | 注入 `userDshHome`，不要写真实 `~/.dsh` |
-| `ChatView` | 仅生命周期/面板测试；`test/obsidian-view-double.ts` 已备 | 需要注入 `client` / `runner` 才能测主链路 |
-| 真实 DSH | 只能真人部署测试 | 发送、流式、停止、超时、历史恢复 |
+| `RunController` | 8 个状态转移/取消/stale-handle 单测 | 纯对象，直接构造 |
+| `ChatView` 主链路 | 7 个替身测试（`ChatViewDeps` 注入 fake client/runner） | 成功/失败/取消/超时/prepare 失败/并发/变更审阅 |
+| 变更审阅 | 7 个 tracker 单测 + 4 个 modal 单测 + 1 个 ChatView 集成测试 | 假 `adapter.list/read/write`；测试替身可回退 `getMarkdownFiles` |
+| 选区动作 | 3 个流测试 + modal 渲染 | 命令 payload、预览 gating、code fence 剥离 |
+| 真实 DSH | 只能真人部署测试 | 发送、流式、停止、超时、历史恢复、选区写回 |
 
-主链路测试的目标不是“渲染像素”，而是：prepare → spawn（替身）→ 流事件 → 成功/失败/取消/超时 → history 写入 → 状态回 idle。当前 `ChatView` 在构造函数里直接 `new DshClient()` / `new DshRunner()`，没有注入点，是这项测试的第一道障碍。
+主链路测试的目标不是“渲染像素”，而是：prepare → 快照 → spawn（替身）→ 流事件 → 成功/失败/取消/超时 → history 写入 → 状态回 idle。`ChatViewDeps`（`client?` / `runner?`）是这条测试的注入点；生产构造仍用真实实现。
 
 ## 10. 已知架构债
 
 | # | 债 | 影响 | 处理 |
 |---|---|---|---|
-| 1 | 无 `RunController`；prepare 失败会卡 running | 状态不一致、难测试、取消/超时边界易错 | 0.1.9 必做 |
-| 2 | 主链路无替身测试 | 4 个真 bug 都靠真人发现 | 0.1.9 必做，和 #1 一起 |
-| 3 | `ChatView` 1313 行，UI + 编排 + 记忆 + 持久化 | 改动冲突面大，多 agent 难并行 | 先抽 RunController；再评估 MessageList/Composer |
-| 4 | `DshRunner` 994 行，6 类职责 | 单测 setup 成本高 | 按需拆 service；不在 0.1.9 大拆 |
-| 5 | stream relay 是 `dsh-runner.ts:254` 模板字符串 | 无法 lint/独立测试，改错只能靠生成后比对 | 低风险时抽成 asset + 字节快照测试 |
-| 6 | `dsh-runner.ts:8` / `chat-view.ts:10` 从 `settings/index` 反向取类型/常量 | 分层不纯，循环依赖风险 | 改从 `settings/types` / `validate` 导入 |
-| 7 | 没有原生会话续跑 | “恢复会话”只是重建记忆 + transcript | 先 spike `dsh --profile tui --resume`；不承诺 |
-| 8 | 没有变更审阅 | 用户只能看聊天记录，无法确认/撤销文件改动 | 0.2 做运行后 diff + undo；预写确认另评估 |
-| 9 | `DshRunner` 构造时捕获 settings 对象引用 | 当前 `loadSettings` 只在 onload 替换一次，暂安全；未来热重载会失效 | 改成 getter 或每次运行新建 |
+| 1 | `ChatView` 1489 行，UI + 编排 + 记忆 + 持久化 + 选区/审阅接线 | 改动冲突面大，多 agent 难并行 | 下一步按需抽 MessageListRenderer/Composer；不要大爆炸 |
+| 2 | `DshRunner` 994 行，6 类职责 | 单测 setup 成本高 | 按需拆 service；不在近期大拆 |
+| 3 | stream relay 是 `dsh-runner.ts:254` 模板字符串 | 无法 lint/独立测试，改错只能靠生成后比对 | 低风险时抽成 asset + 字节快照测试 |
+| 4 | `dsh-runner.ts:8` / `chat-view.ts:10` 从 `settings/index` 反向取类型/常量 | 分层不纯，循环依赖风险 | 改从 `settings/types` / `validate` 导入 |
+| 5 | 没有原生会话续跑 | “恢复会话”只是重建记忆 + transcript | 先 spike `dsh --profile tui --resume`；不承诺 |
+| 6 | 变更审阅在每次运行前全量读 Markdown（上限 2000 文件 / 512KB / 64MB） | 大 vault 有启动延迟；超限只能提示 incomplete | 观察真实 vault 耗时；需要时改成按 workdir 或事件驱动 |
+| 7 | diff 是“公共前后缀 + 单块”表示，不是完整 Myers diff | 多处分散编辑只显示首尾变更 | MVP 可接受；用户反馈后再升级 |
+| 8 | `DshRunner` 构造时捕获 settings 对象引用 | 当前 `loadSettings` 只在 onload 替换一次，暂安全；未来热重载会失效 | 改成 getter 或每次运行新建 |
+| 9 | `RunController` 不拥有 timeout/client | 超时语义仍由 `DshClient` 与 `ChatView` 的结果分支共同保证 | 保持轻量；若出现状态/子进程不一致再合并 |
 
 ## 11. 修改架构时的规则
 

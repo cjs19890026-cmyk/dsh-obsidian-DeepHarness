@@ -9,7 +9,7 @@ import { scanSkillRoots, type SkillEntry, type ScanRoot } from '../core/skills';
 import { SkillSuggest } from './skill-suggest';
 import { REASONING_OPTIONS, PERMISSION_OPTIONS, modelDisplayLabel, modelOptionsWithCurrent, permissionLabel, type PermissionMode } from '../settings/index';
 import { ContextMeter, estimateTokens } from '../core/context-meter';
-import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir, frontmatterAliases, partialTurnAnswer } from '../dsh/pure';
+import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir, frontmatterAliases, partialTurnAnswer, stripCodeFence } from '../dsh/pure';
 import { HistoryTool } from '../core/history';
 import { MentionSuggest } from './mention';
 import { ChipEditor } from './chip-editor';
@@ -19,6 +19,14 @@ import { t, type TranslationKey } from '../i18n/index';
 import { isInside } from '../dsh/paths';
 import { OBSIDIAN_SKILL_NAME } from '../core/obsidian-skill';
 import { NoteCreatorModal } from './modals';
+import { RunController, type RunHandle } from './run-controller';
+import { snapshotVault, diffSnapshots, undoChange, type ChangeSnapshot } from '../core/change-tracker';
+import { ChangeReviewModal } from './change-review-modal';
+import {
+  SelectionPreviewModal,
+  type SelectionAction,
+  type SelectionApplyMode,
+} from './selection-modals';
 
 export const VIEW_TYPE_CHAT = 'deepharness-chat';
 
@@ -77,10 +85,41 @@ function makeMemoryTurn(user: string, answer: string): MemoryTurn {
   };
 }
 
+/**
+ * Injectable seams for the run path.
+ *
+ * Production constructs the real client/runner. Tests (and future agents)
+ * need to drive the view through `prepareRun -> spawn -> stream -> finish`
+ * without launching dsh or writing to the user's real DSH_HOME. Keeping this
+ * explicit is what makes the main chain testable: previously the constructor
+ * called `new DshClient()` / `new DshRunner()` and a view test could only
+ * monkey-patch private fields after the fact.
+ */
+export interface ChatViewDeps {
+  client?: DshClient;
+  runner?: DshRunner;
+}
+
+/**
+ * A selection action waiting for the current run's final answer.
+ *
+ * `apply` is supplied by the plugin and owns the editor range, so the view
+ * never has to hold an `Editor` (which may be replaced when the user switches
+ * notes). The view only decides *when* the preview is safe to show.
+ */
+export interface SelectionRequest {
+  action: SelectionAction;
+  instruction?: string;
+  original: string;
+  apply: (replacement: string, mode: SelectionApplyMode) => boolean;
+}
+
 export class ChatView extends ItemView {
   plugin: DshPlugin;
   private client: DshClient;
   private runner: DshRunner;
+  private readonly run = new RunController();
+  private selectionRequest: SelectionRequest | null = null;
 
   private messagesContainer!: HTMLElement;
   private editor!: ChipEditor;
@@ -107,8 +146,6 @@ export class ChatView extends ItemView {
   private skillSuggest: SkillSuggest | null = null;
   private statusTimer: number | null = null;
   private statusStartedAt = 0;
-  private abortController: AbortController | null = null;
-  private running = false;
   private memory: MemoryTurn[] = [];
   private contextMeter: ContextMeter | null = null;
   private settingsUnsub: (() => void) | null = null;
@@ -123,11 +160,12 @@ export class ChatView extends ItemView {
    *  persist an optional partial turn. Set by onClose() / shutdownForUnload(). */
   private closed = false;
 
-  constructor(leaf: WorkspaceLeaf, plugin: DshPlugin) {
+  constructor(leaf: WorkspaceLeaf, plugin: DshPlugin, deps: ChatViewDeps = {}) {
     super(leaf);
     this.plugin = plugin;
-    this.client = new DshClient();
-    this.runner = new DshRunner(plugin.settings, plugin.app.vault.configDir);
+    this.client = deps.client ?? new DshClient();
+    this.runner = deps.runner
+      ?? new DshRunner(plugin.settings, plugin.app.vault.configDir);
     // The plugin walks its open views on unload (Obsidian may skip onClose()),
     // so every view joins the registry at birth and leaves on teardown.
     plugin.registerChatView(this);
@@ -269,7 +307,7 @@ export class ChatView extends ItemView {
     // Send button (capsule)
     this.sendButton = toolbar.createEl('button', { cls: 'dsh-send-btn', text: t('chat.send') });
     this.sendButton.onclick = () => {
-      if (this.running) {
+      if (this.run.isActive()) {
         this.stopRun();
       } else {
         void this.sendMessage();
@@ -309,7 +347,7 @@ export class ChatView extends ItemView {
     }
     if (this.historyBtn) this.historyBtn.setAttribute('aria-label', t('chat.historyButton'));
     this.editor.el.setAttribute('data-placeholder', t('chat.placeholder'));
-    if (this.sendButton) this.sendButton.setText(this.running ? t('chat.stop') : t('chat.send'));
+    if (this.sendButton) this.sendButton.setText(this.run.isActive() ? t('chat.stop') : t('chat.send'));
     const welcomeSub = this.messagesContainer.querySelector('.dsh-welcome-sub');
     if (welcomeSub) welcomeSub.textContent = t('chat.welcomeSub');
     this.updateTriggerLabels();
@@ -420,7 +458,8 @@ export class ChatView extends ItemView {
    */
   private teardown(): void {
     this.closed = true;
-    this.abortController?.abort();
+    this.run.dispose();
+    this.clearSelectionRequest();
     this.client.dispose();
     this.closePanels();
     this.mention?.dispose();
@@ -446,10 +485,11 @@ export class ChatView extends ItemView {
   }
 
   private clearChat(): void {
-    if (this.running) {
+    if (this.run.isActive()) {
       new Notice(t('chat.busy'));
       return;
     }
+    this.clearSelectionRequest();
     // Archive the current session into history, then start a new one.
     void this.plugin.history?.endSession();
     this.mention?.close();
@@ -554,25 +594,63 @@ export class ChatView extends ItemView {
 
   private async sendMessage(): Promise<void> {
     const message = this.editor.getText().trim();
-    if (!message || this.running) {
-      if (this.running) new Notice(t('chat.busy'));
+    if (!message || !this.run.canStart()) {
+      if (this.run.isActive()) new Notice(t('chat.busy'));
       return;
     }
 
-    this.editor.clear();
-    this.renderMessage('user', message);
+    // Claim the lifecycle before any await. If starting fails (a run is
+    // already active), the editor and transcript must be left untouched.
+    const handle = this.run.start();
+    if (!handle) return;
 
-    this.running = true;
-    this.abortController = new AbortController();
-    this.setButtonToStop();
+    try {
+      this.editor.clear();
+      this.renderMessage('user', message);
+      this.setButtonToStop();
+      await this.executeRun(message, handle);
+    } finally {
+      // This is the invariant the old `running` boolean was missing: every
+      // path — preparation failure, spawn failure, cancel, timeout, close —
+      // finishes the controller and returns the composer to Send.
+      this.run.finish(handle);
+      if (!this.closed) {
+        this.resetButtonToSend();
+        this.scrollToBottom();
+      }
+    }
+  }
 
+  /**
+   * Run one already-claimed turn. Kept separate from `sendMessage()` so the
+   * UI bookkeeping above has exactly one cleanup path; `executeRun` may throw
+   * and `sendMessage`'s finally still restores the composer.
+   */
+  private async executeRun(
+    message: string,
+    handle: RunHandle,
+  ): Promise<void> {
     const prep = await this.prepareRun(message);
-    if (!prep.ok) return;
+    if (!prep.ok) {
+      this.run.fail(handle);
+      this.clearSelectionRequest();
+      return;
+    }
+    // A Stop while preparation was in flight cancels the handle; the late
+    // preparation result must not spawn a child or touch the transcript.
+    if (!this.run.isCurrent(handle) || !this.run.markRunning(handle)) return;
     const { bin, nodeBin, dshScript, task, dshHome, workdir, patchPaths } = prep;
     // P1-3: preparation degraded (DSH_HOME fallback, patch / skill / memory
     // write failures, workdir fallback…) — surface it once instead of running
     // degraded silently.
     if (prep.issues.length > 0) this.renderPreparationIssues(prep.issues);
+
+    // Post-run review needs the pre-spawn text. Selection runs already end in a
+    // preview dialog, so they skip this (and avoid stacking two modals).
+    const reviewBefore = this.selectionRequest ? null : await this.captureVaultSnapshot();
+    // Stop can land while the snapshot is being read; `isCurrent` alone would
+    // still be true for the terminal state, so require an active run.
+    if (!this.run.isCurrent(handle) || !this.run.isActive()) return;
 
     // Streaming assistant message: thinking + tools stream inline into the
     // message (web-UI style, no wrapper container), then the answer renders
@@ -696,7 +774,7 @@ export class ChatView extends ItemView {
         permissionMode: this.plugin.settings.permissionMode,
         patchPath: patchPaths,
         timeoutMs: this.plugin.settings.timeoutSec * 1000,
-        signal: this.abortController.signal,
+        signal: handle.signal,
         onStdoutLine: handleStreamLine,
       });
 
@@ -707,31 +785,43 @@ export class ChatView extends ItemView {
         // is gone — never write to it. What the run produced before the kill
         // is kept as a partial turn (when it is worth keeping) instead of
         // being silently dropped.
+        this.run.fail(handle);
+        this.clearSelectionRequest();
         this.savePartialTurn(message, thinkingText, toolsHistory, result);
       } else if (result.killReason === 'user') {
         // Stopped by the user: keep it subtle — a small status note only.
+        this.run.cancel(handle);
+        this.clearSelectionRequest();
         statusEl.setText(`⏹ ${t('chat.cancelled')}`);
         this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
       } else if (result.killReason === 'timeout') {
         // Auto-stopped after the configured timeout: surface it as an error
         // with its own message, so it is never mistaken for a manual stop.
+        this.run.timeout(handle);
+        this.clearSelectionRequest();
         const msg = t('chat.timedOut');
         statusEl.setText(`✗ ${msg}`);
         statusEl.addClass('dsh-status-error');
         contentEl.createSpan({ text: `> ❌ ${msg}`, cls: 'dsh-error-inline' });
         this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
       } else if (result.exitCode !== 0 || !result.stdout.trim()) {
+        this.run.fail(handle);
+        this.clearSelectionRequest();
         const errMsg = this.extractError(result.stderr);
         statusEl.setText(`✗ ${t('chat.failed', { message: errMsg })}`);
         statusEl.addClass('dsh-status-error');
         contentEl.createSpan({ text: `> ❌ ${t('chat.failed', { message: errMsg })}`, cls: 'dsh-error-inline' });
         this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
       } else {
+        this.run.succeed(handle);
         // The stream relay consumed DLEVENT lines live; the remaining stdout
         // is the final answer.
         const answer = parseHeadlessOutput(result.stdout);
         statusEl.setText(`✓ ${t('chat.completed', { duration: String(Math.round(result.durationMs / 1000)) })}`);
         this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, answer);
+        // Selection runs show a review dialog; nothing is written to the note
+        // until the user chooses Replace / Insert below.
+        this.showSelectionPreview(answer);
         // Remember this turn for the next task (condensed, not first-line-only:
         // see MEMORY_CONTEXT for why this is the whole context window).
         this.memory.push(makeMemoryTurn(message, answer));
@@ -752,19 +842,47 @@ export class ChatView extends ItemView {
       }
     } catch (e) {
       this.stopStatusTimer();
+      this.run.fail(handle);
+      this.clearSelectionRequest();
       if (this.closed) return; // torn down mid-run: nothing to render
       const msg = e instanceof Error ? e.message : String(e);
       statusEl.setText(`✗ ${t('chat.failed', { message: msg })}`);
       statusEl.addClass('dsh-status-error');
       contentEl.createSpan({ text: `> ❌ ${t('chat.failed', { message: msg })}`, cls: 'dsh-error-inline' });
       this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
-    } finally {
-      this.running = false;
-      this.abortController = null;
-      if (!this.closed) {
-        this.resetButtonToSend();
-        this.scrollToBottom();
-      }
+    }
+
+    if (!this.closed && reviewBefore) void this.reviewChanges(reviewBefore);
+  }
+
+  /** Best-effort pre-run snapshot; a failure must never block the task. */
+  private async captureVaultSnapshot(): Promise<ChangeSnapshot | null> {
+    try {
+      return await snapshotVault(this.app);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Compare the vault with the pre-run snapshot and offer an explicit undo.
+   * Runs after the turn settles, so opening the modal never delays the answer
+   * or the composer returning to Send.
+   */
+  private async reviewChanges(before: ChangeSnapshot): Promise<void> {
+    try {
+      const after = await snapshotVault(this.app);
+      const changes = diffSnapshots(before, after);
+      if (changes.length === 0 || this.closed) return;
+      new ChangeReviewModal(
+        this.app,
+        changes,
+        before.incomplete || after.incomplete,
+        (change) => undoChange(this.app, change),
+      ).open();
+    } catch {
+      // The run itself already succeeded/failed; a review failure is not worth
+      // interrupting the conversation. The next run takes a fresh snapshot.
     }
   }
 
@@ -823,7 +941,7 @@ export class ChatView extends ItemView {
   }
 
   private stopRun(): void {
-    this.abortController?.abort();
+    this.run.cancelCurrent();
     this.client.stop();
   }
 
@@ -1126,6 +1244,66 @@ export class ChatView extends ItemView {
     this.editor.setText(text);
     this.editor.focus();
     this.scrollToBottom();
+  }
+
+  /**
+   * Start a selection action chosen by the plugin's "selection" command.
+   *
+   * The prompt is sent immediately (the user already picked an action in the
+   * modal); the result is never applied automatically. `SelectionPreviewModal`
+   * is opened only after this run succeeds.
+   */
+  beginSelectionAction(request: SelectionRequest): void {
+    if (!this.editor) {
+      new Notice(t('chat.noChatView'));
+      return;
+    }
+    if (!this.run.canStart()) {
+      new Notice(t('chat.busy'));
+      return;
+    }
+    this.selectionRequest = request;
+    const instruction = request.action === 'custom'
+      ? (request.instruction ?? '')
+      : this.selectionInstruction(request.action);
+    this.setPendingInput(t('selection.promptTemplate', {
+      instruction,
+      text: request.original,
+    }));
+    void this.sendMessage();
+  }
+
+  private selectionInstruction(action: Exclude<SelectionAction, 'custom'>): string {
+    switch (action) {
+      case 'rewrite':
+        return t('selection.prompt.rewrite');
+      case 'summarize':
+        return t('selection.prompt.summarize');
+      case 'explain':
+        return t('selection.prompt.explain');
+    }
+  }
+
+  /**
+   * Show the preview for the run that just succeeded, then forget it. Called
+   * only from the success branch: failed/cancelled runs must not leave a
+   * stale request that would capture the next ordinary answer.
+   */
+  private showSelectionPreview(answer: string): void {
+    const request = this.selectionRequest;
+    this.selectionRequest = null;
+    if (!request) return;
+    const cleaned = stripCodeFence(answer);
+    new SelectionPreviewModal(
+      this.app,
+      request.original,
+      cleaned,
+      (replacement, mode) => request.apply(replacement, mode),
+    ).open();
+  }
+
+  private clearSelectionRequest(): void {
+    this.selectionRequest = null;
   }
 
   /**

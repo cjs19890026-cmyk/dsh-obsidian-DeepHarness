@@ -23,7 +23,7 @@ npm ci --cache "$(pwd)/.npm-cache"
 
 | 命令 | 作用 |
 |---|---|
-| `npm test` | 全量 Vitest（当前基线 294 passed / 2 skipped，14 文件） |
+| `npm test` | 全量 Vitest（当前基线 323 passed / 2 skipped，19 文件） |
 | `npx tsc --noEmit` | 类型检查 |
 | `npm run build` | 生产构建到 `dist/`（main.js + manifest.json + styles.css） |
 | `npm run dev` | 非压缩构建（**只构建一次，不是 watch**） |
@@ -78,13 +78,15 @@ npx eslint "src/**/*.ts"
 3. **停止**：长任务中点 Stop；状态变为 cancelled；无残留子进程（活动监视器/任务管理器）。
 4. **超时**：把 timeout 设为 5s，发送 `sleep 20`；状态为 timedOut，不是 failed/cancelled。
 5. **失败**：断网/清空凭据；错误提示可读，按钮回到 Send。
-6. **准备失败**：临时把 `dsh` 路径指向不存在文件；点发送；确认按钮/状态能恢复（当前版本这里可能卡 running，见 roadmap 0.1.9）。
+6. **准备失败**：临时把 `dsh` 路径指向不存在文件；点发送；确认按钮恢复 Send、状态回 idle（stuck-Stop 回归）。
 7. **历史**：完成两轮 → 关闭/重开 Obsidian → 历史面板能恢复；pin/rename/note 正常；当前会话不丢。
 8. **设置**：改 model / reasoning / permission → 下一次运行生效；`~/.dsh/deepharness/<vaultKey>/settings.yaml` 内容正确。
 9. **权限**：切到 full access 必须二次确认；取消后仍是原模式。
 10. **引用/提及/技能**：有选区与无选区引用当前笔记；`@` 搜索插入 wikilink；`/` 技能建议可用。
 11. **i18n**：切 en/zh，已打开面板即时刷新；命令面板名称也刷新。
 12. **关闭面板 mid-run**：不崩溃；重新打开后历史里有 partial turn（若有内容）。
+13. **选区动作**：选中一段文字 → 命令 `处理选中文本` → 选改写/总结/解释 → 预览出现；点 Cancel 文件不变；点 Replace/Insert below 才写回，且选区已变化时拒绝写入。
+14. **变更审阅**：让 agent 改 2–3 个笔记 → 运行结束出现变更列表；逐文件 Undo 后内容与运行前一致；Undo all 全部恢复；大文件/超限时显示 incomplete 提示。
 
 ## 6. 部署
 

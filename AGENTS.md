@@ -22,9 +22,9 @@ DeepHarness 是 Obsidian 桌面插件（id `deepharness`），把 **DeepSeek Har
 |---|---|
 | 默认分支 | `main`；合并基线 `f60d71d`（此后 HEAD 以 git log 为准） |
 | 版本 | `package.json` / `manifest.json` = `0.1.8` |
-| 测试 | `npm test` → **294 passed / 2 skipped**（14 个测试文件） |
+| 测试 | `npm test` → **323 passed / 2 skipped**（19 个测试文件） |
 | 类型 | `npx tsc --noEmit` 通过 |
-| 构建 | `npm run build` 通过（`dist/main.js` ≈134 KB） |
+| 构建 | `npm run build` 通过（`dist/main.js` ≈149 KB） |
 | Lint | `npx eslint "src/**/*.ts"` → 0 errors / 9 warnings（已知基线，不要新增） |
 | 运行时 | Node 22（CI），Obsidian 1.13+，桌面端 only |
 

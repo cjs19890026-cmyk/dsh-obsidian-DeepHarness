@@ -1,8 +1,9 @@
-import { Plugin, WorkspaceLeaf, Notice } from 'obsidian';
+import { Plugin, WorkspaceLeaf, Notice, MarkdownView, type Editor } from 'obsidian';
 import * as path from 'path';
 import { DshSettings, DshSettingTab, normalizeStoredSettings, obsidianLocale, type OptionFieldKey, type PermissionMode } from './settings/index';
 import { ChatView, VIEW_TYPE_CHAT } from './views/chat-view';
 import { SecurityConfirmModal } from './views/modals';
+import { SelectionActionModal } from './views/selection-modals';
 import { DshClient } from './dsh/dsh-client';
 import { HistoryStore } from './core/history';
 import { resolveUserDshHome } from './dsh/paths';
@@ -113,6 +114,7 @@ export default class DshPlugin extends Plugin {
     if (this.commandsRegistered) {
       this.removeCommand('open-harness-chat');
       this.removeCommand('ask-active-note');
+      this.removeCommand('ask-selection');
       this.registerCommands();
     }
     this.notifyLocaleChange();
@@ -139,6 +141,13 @@ export default class DshPlugin extends Plugin {
           return true;
         }
         return false;
+      },
+    });
+    this.addCommand({
+      id: 'ask-selection',
+      name: t('chat.selectionCommand'),
+      editorCallback: (editor) => {
+        this.askSelection(editor);
       },
     });
     this.commandsRegistered = true;
@@ -184,6 +193,67 @@ export default class DshPlugin extends Plugin {
         () => resolve(false),
       ).open();
     });
+  }
+
+  /**
+   * Command entry for "rewrite / summarize / explain the selection".
+   *
+   * Capture the text and range *before* opening the chat: focusing the chat
+   * panel moves the editor selection, and a delayed read would target the
+   * wrong text. The range is re-validated right before applying because the
+   * user may edit the note while the agent is running.
+   */
+  private askSelection(editor: Editor): void {
+    const text = editor.getSelection();
+    if (!text.trim()) {
+      new Notice(t('chat.selectionEmpty'));
+      return;
+    }
+    const sourceView = this.app.workspace.getActiveViewOfType(MarkdownView);
+    const file = sourceView?.file;
+    if (!sourceView || !file) return;
+    const from = editor.getCursor('from');
+    const to = editor.getCursor('to');
+
+    new SelectionActionModal(this.app, (action, instruction) => {
+      void (async () => {
+        const view = await this.activateChatView();
+        if (!view) {
+          new Notice(t('chat.noChatView'));
+          return;
+        }
+        view.beginSelectionAction({
+          action,
+          instruction,
+          original: text,
+          apply: (replacement, mode) => {
+            try {
+              // Focusing the chat panel may have switched notes; never write
+              // the result into whichever editor happens to be focused now.
+              if (sourceView.file?.path !== file.path) {
+                new Notice(t('chat.selectionChanged'));
+                return false;
+              }
+              if (editor.getRange(from, to) !== text) {
+                new Notice(t('chat.selectionChanged'));
+                return false;
+              }
+              if (mode === 'replace') {
+                editor.replaceRange(replacement, from, to);
+              } else {
+                editor.replaceRange(`\n\n${replacement}`, to);
+              }
+              return true;
+            } catch {
+              // The editor was closed or its document replaced while the run
+              // was in flight. Refuse rather than writing into another note.
+              new Notice(t('chat.selectionChanged'));
+              return false;
+            }
+          },
+        });
+      })();
+    }).open();
   }
 
   private async askWithActiveNote(): Promise<void> {

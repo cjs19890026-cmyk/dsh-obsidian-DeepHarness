@@ -111,8 +111,8 @@ npm run build
 
 ## Roadmap
 
-- **0.1.9 — Trusted runs**: explicit run state machine, main-chain tests, change-review feasibility.
-- **0.2.0 — Work in the note**: selection actions, diff review + undo, run history, batch queue.
+- **0.1.9 — Trusted runs** (internal milestone, unreleased): explicit run state machine, main-chain tests, selection actions, post-run change review + undo.
+- **0.2.0 — Work in the note**: batch queue, run history/audit, native session-continuity research.
 - **Later**: native session continuity, custom DSH profiles, skill editing UX, recipes.
 
 Full priorities and acceptance criteria: [`docs/roadmap.md`](./docs/roadmap.md).

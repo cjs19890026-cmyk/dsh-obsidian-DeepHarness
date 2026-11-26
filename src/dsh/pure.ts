@@ -235,3 +235,14 @@ export function partialTurnAnswer(
   if (thinking.trim() || hasTools) return marker;
   return null;
 }
+
+/**
+ * Models often wrap a replacement in a Markdown fence even when asked not to.
+ * Strip one complete outer fence so the preview shows (and applies) the text
+ * itself, not the fence markers. Incomplete/embedded fences are left alone.
+ */
+export function stripCodeFence(text: string): string {
+  const trimmed = text.trim();
+  const match = /^```[^\n]*\n([\s\S]*?)\n```$/.exec(trimmed);
+  return match ? match[1].trim() : trimmed;
+}
