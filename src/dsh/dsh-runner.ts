@@ -487,20 +487,14 @@ export class DshRunner {
   }
 
   /**
-   * Plugin-owned DSH_HOME: an isolated directory inside the vault so the
-   * per-task model / reasoning settings never pollute the user's global
-   * `~/.dsh` (which the web app also reads). Credentials are symlinked from
-   * the user's real DSH_HOME; settings.yaml is (re)written on every task
-   * with the currently selected model + reasoning effort.
+   * The DSH_HOME the plugin actually uses: the isolated system location
+   * (`~/.dsh/deepharness/<vaultKey>/`), or the legacy in-vault tree when a
+   * migration could not complete (see {@link resolvePluginDshHome}). Keeping it
+   * outside the vault means per-task model / reasoning settings never pollute
+   * the user's global `~/.dsh`; credentials are symlinked from there, and
+   * settings.yaml is rewritten on every task.
    *
-   * Returns the plugin home, or null on failure (caller falls back to the
-   * user home, where the model dropdown is then ignored).
-   */
-  /**
-   * The DSH_HOME the plugin actually uses: the system location, or the legacy
-   * in-vault tree when a migration could not complete (see
-   * {@link resolvePluginDshHome}). Read-only — use {@link ensurePluginDshHome}
-   * to prepare it.
+   * Read-only — use {@link ensurePluginDshHome} to prepare it.
    */
   pluginDshHome(vaultRoot: string): string {
     return resolvePluginDshHome(vaultRoot, this.configDir, this.dshHome());
@@ -679,8 +673,8 @@ export class DshRunner {
    * Write the built-in `obsidian` skill into the plugin-owned DSH_HOME so the
    * headless agent discovers it via dsh-skill-filesystem (<dshHome>/skills,
    * rank 400). Plugin-owned: always regenerated so the skill tracks the plugin
-   * version. Users override it by dropping their own skill at
-   * `<vault>/.dsh/skills/obsidian/` (rank 100 project root, wins).
+   * version, and authoritative for its own name. Users' vault-scoped skills
+   * live alongside it in `<dshHome>/skills/`.
    *
    * Returns the skill directory, or null on failure / when disabled.
    */

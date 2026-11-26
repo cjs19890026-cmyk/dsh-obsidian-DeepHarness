@@ -4,7 +4,7 @@
   <h3>让 DeepSeek Harness 住进你的 Obsidian 笔记库 ✨</h3>
   <p><b>真正的 Agent · 完整工具链 · 数据与密钥留在本机</b></p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.1.0-4C8DFF?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-0.1.8-4C8DFF?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Obsidian-1.13.0%2B-7C3AED?style=flat-square&logo=obsidian&logoColor=white" alt="Obsidian">
     <img src="https://img.shields.io/badge/license-MIT-3DA639?style=flat-square" alt="License">
     <img src="https://img.shields.io/badge/platform-desktop%20only-8A2BE2?style=flat-square" alt="Desktop only">
@@ -13,7 +13,8 @@
 
 <p align="center">
   <a href="./README.md">English</a> ·
-  <a href="./DESIGN.md">设计文档</a> ·
+  <a href="./docs/architecture.md">架构文档</a> ·
+  <a href="./docs/roadmap.md">路线图</a> ·
   <a href="https://github.com/cjs19890026-cmyk/dsh-obsidian-DeepHarness">GitHub</a>
 </p>
 
@@ -45,7 +46,7 @@
 | 依赖 | 要求 | 说明 |
 | --- | --- | --- |
 | Obsidian | **1.13.0 及以上**的桌面版 | Windows / macOS / Linux 均可；移动端不支持 |
-| Node.js | **20+（建议 LTS）** | 构建插件与运行 DSH 都需要；若 `dsh` 的 shebang 在 Obsidian 受限 PATH 下失效，插件会直接用 node 运行 DSH 入口脚本 |
+| Node.js | **22+（建议 LTS）** | 构建插件与运行 DSH 都需要；若 `dsh` 的 shebang 在 Obsidian 受限 PATH 下失效，插件会直接用 node 运行 DSH 入口脚本 |
 | DeepSeek Harness CLI | `npm i -g @deepseek-ai/dsh` | 插件不内置 agent，DSH 才是执行引擎 |
 | DeepSeek 凭据 | 任选其一 | ① 在 DSH Web（Models 页）写入 `~/.dsh/.credentials.yaml`；② 导出 `DEEPSEEK_API_KEY` 环境变量；③ 在插件设置中填写「插件专属 API Key」 |
 
@@ -87,14 +88,14 @@ dsh --profile headless "用 bash 运行 pwd 和 ls"
    └── styles.css
    ```
 
-> 如果 Releases 页面暂时还没有资产（当前仍是开发预览），请直接使用方法三。
+> 如果 Releases 页面暂时没有可用资产，请使用方法三从源码构建。
 
 ### 方法三：从源码构建
 
 ```bash
 git clone https://github.com/cjs19890026-cmyk/dsh-obsidian-DeepHarness.git
 cd dsh-obsidian-DeepHarness
-npm install
+npm ci
 npm run build
 ```
 
@@ -162,13 +163,13 @@ Copy-Item dist\main.js, dist\manifest.json, dist\styles.css "$V\.obsidian\plugin
 - **命令**：「让 DeepHarness 处理当前笔记」自动把当前笔记内容（前 20000 字）填入任务。
 - **长期记忆** `Harness/memory.md`：agent 每轮任务先读、结束时把跨会话结论写回；用户可自由编辑。
 - **自动生成 vault persona**（`.obsidian/plugins/deepharness/generated/vault.yml`）：约束 agent 使用 wikilink、破坏性操作先征得同意；可自行编辑。
-- **内置 `obsidian` 技能**：agent 自动获得 Obsidian 约定（frontmatter / wikilink / tag / 日记 / 附件等）与安全红线；用户可放自己的技能到 `<vault>/.dsh/skills/obsidian/` 覆盖。
+- **内置 `obsidian` 技能**：agent 自动获得 Obsidian 约定（frontmatter / wikilink / tag / 日记 / 附件等）与安全红线；内置技能写入插件专属 DSH_HOME 的 `skills/obsidian/`；也可以把自己的技能放进设置里选择的「附加技能文件夹」。
 
 ### 🧠 模型与运行控制
 
 - **模型选择器 + 模型列表**：下拉框里的模型由设置页的「模型列表」决定,可以随时增删,内置的那几个也能删。官方出新模型时**直接填 ID 加一行就能用,不用等插件更新**。另有「从 DSH 导入」按钮,按一下才读取你自己 DSH 配置里声明的模型 ID(不点就不读)。默认模型为 `deepseek-flash`(官方 API 的滚动别名)。
 - **推理等级（Thinking）**：顶栏可切换 **off / high / max**。
-  - 通过插件专属 DSH_HOME（`dsh-home/` 目录）写入 `agent-default-model` 配置，凭据软链复用 `~/.dsh`，**不污染**全局 DSH 设置。
+  - 通过插件专属 DSH_HOME（`~/.dsh/deepharness/<vaultKey>/`）写入 `agent-default-model` 配置，凭据软链复用 `~/.dsh`，**不污染**全局 DSH 设置。
 - **安全模式（Security）**：只读 / 工作区写入 / 完全访问；切入「完全访问」必须二次确认。
 - **停止按钮**：SIGTERM 终止运行；**超时兜底**默认 10 分钟。
 - **对话记忆**：前几轮要点自动回填到新任务。
@@ -194,7 +195,7 @@ Copy-Item dist\main.js, dist\manifest.json, dist\styles.css "$V\.obsidian\plugin
 
 - **技能按钮**（🔧）列出 DSH 发现的全部技能（名称 + 描述 + 来源），点击把 `/技能名 ` 插入输入框。
 - 输入 `/` 弹出技能补全；DSH 原生识别 `/名称` 斜杠调用并自动注入技能全文。
-- 内置 `obsidian` 技能之外，可**可选**添加你 vault 里存放技能的其他文件夹：设置里点「选择文件夹…」直接挑选即可（无需手输路径），技能面板与 `/技能名` 调用会同步发现；留空则只用内置与自动发现（`.dsh/skills`）的技能。
+- 内置 `obsidian` 技能之外，可**可选**添加你 vault 里存放技能的其他文件夹：设置里点「选择文件夹…」直接挑选即可（无需手输路径），技能面板与 `/技能名` 调用会同步发现；留空则只用内置技能；需要时再添加附加技能文件夹。
 
 ---
 
@@ -204,7 +205,7 @@ Copy-Item dist\main.js, dist\manifest.json, dist\styles.css "$V\.obsidian\plugin
 | --- | --- | --- |
 | dsh 二进制路径 | 自动探测 | 留空 = PATH；探测顺序：设置值 → PATH → 常见安装目录 |
 | Node.js 路径 | 自动探测 | 插件用 node 直接运行 dsh 脚本，绕过 Obsidian 受限 PATH 的 shebang 问题 |
-| DSH_HOME | `~/.dsh` | 凭据 / 配置根 |
+| DSH_HOME | `~/.dsh` | 凭据 / 配置根。插件自己的 DSH_HOME 隔离在 `~/.dsh/deepharness/<vaultKey>/` |
 | 插件专属 API Key | 空 | 仅供插件使用的 DeepSeek API Key（与桌面端分离）；留空 = 复用桌面端凭据 |
 | 模型提供方 | DeepSeek 官方 API | deepseek-official = DeepSeek 官方接口；opencode-go = OpenCode Go 订阅（OpenAI 兼容，接口 https://opencode.ai/zen/go/v1） |
 | 工作目录 | vault 根 | 可填相对子目录限定 agent 范围；越界路径会安全回退到 vault 根 |
@@ -230,7 +231,7 @@ Copy-Item dist\main.js, dist\manifest.json, dist\styles.css "$V\.obsidian\plugin
 ```
 Obsidian 插件 ──spawn──▶ node <dsh入口脚本> --profile headless --patch <vault.yml> "<任务>"
                             │ cwd = vault 根（或设置的工作目录）
-                            │ DSH_HOME = 插件专属目录（凭据软链复用 ~/.dsh）
+                            │ DSH_HOME = ~/.dsh/deepharness/<vaultKey>（凭据软链复用 ~/.dsh）
                             │ DEEPSEEK_API_KEY = 可选插件专属 Key
                             ▼
                     DeepSeek Harness agent
@@ -254,10 +255,11 @@ Obsidian 插件 ──spawn──▶ node <dsh入口脚本> --profile headless -
 
 ## 🗺 Roadmap
 
-- **Phase 1 / 2（已完成）**：子进程桥接、环境自检、流式输出、工具调用日志、会话历史持久化、模型 / 推理 / 安全切换、@ 提及、技能系统、长期记忆。
-- **Phase 3（进行中）**：文件修改 diff 确认、批量处理 vault 笔记、发布到 Obsidian 社区插件市场。
+- **0.1.9 — 可信运行**：显式运行状态机、主链路替身测试、变更审阅可行性验证。
+- **0.2.0 — 在笔记里工作**：选区动作、diff 审阅 + 撤销、运行历史、批量队列。
+- **更远**：原生会话连续性、自定义 DSH profile、技能编辑 UX、recipes。
 
-详见 [`DESIGN.md`](./DESIGN.md)。
+完整优先级与验收标准见 [`docs/roadmap.md`](./docs/roadmap.md)。
 
 ---
 
@@ -267,14 +269,14 @@ Obsidian 插件 ──spawn──▶ node <dsh入口脚本> --profile headless -
 git clone https://github.com/cjs19890026-cmyk/dsh-obsidian-DeepHarness.git
 cd dsh-obsidian-DeepHarness
 
-npm install          # 安装依赖
-npm run dev          # 开发构建（监听改动）
-npm run build        # 生产构建到 dist/
+npm ci               # 安装依赖
+npm run build        # 构建到 dist/
 npm test             # 运行测试
+npx tsc --noEmit     # 类型检查
 ./deploy.sh <vault>  # 构建并部署到指定 vault
 ```
 
-欢迎提交 Issue / PR。功能需求与设计取舍请先阅读 [`DESIGN.md`](./DESIGN.md)。
+欢迎提交 Issue / PR。开发前请先读 [`AGENTS.md`](./AGENTS.md) 与 [`docs/roadmap.md`](./docs/roadmap.md)。
 
 ---
 

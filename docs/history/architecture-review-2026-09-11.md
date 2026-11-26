@@ -1,5 +1,9 @@
 # DeepHarness 架构审查与优化方案（2026-09-11）
 
+> **历史快照，不是当前任务清单。** 本文记录 2026-09-11 的审查结论；其中阶段 0–2 已完成，
+> 阶段 3 部分完成，部分建议已被后续决策取代。当前架构见 [`../architecture.md`](../architecture.md)，
+> 当前任务见 [`../roadmap.md`](../roadmap.md)。不要按本文的旧清单直接开工。
+
 > 审查范围：全部 src/（31 个 TS 文件）、构建/CI 配置、HANDOFF.md / AI_CONTEXT.md。
 > 本次审查未改动任何代码。验证基线（实测）：`npm test` = **236 passed / 2 skipped**（12 个测试文件）。
 > 总体判断：**工程质量在 Obsidian 插件里属于上乘**（原子写、env 白名单、killReason 区分、双语 i18n、保护测试齐全）。

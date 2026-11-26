@@ -147,10 +147,10 @@ export const PERMISSION_OPTIONS = [
   { id: 'danger-full-access', label: 'Full access' },
 ] as const;
 
-/** Union types derived from the option lists above (see §4.5 of HANDOFF.md). */
-/* The `as const` tables above are the single source of these unions (HANDOFF
-   §4.5): adding an option there widens the type, and `loadSettings` validates
-   stored values against them. */
+/** Union types derived from the option lists above (see docs/architecture.md). */
+/* The `as const` tables above are the single source of these unions: adding an
+   option there widens the type, and `loadSettings` validates stored values
+   against them. */
 export type ProviderId = typeof PROVIDER_OPTIONS[number]['id'];
 /** The built-in model ids. `DshSettings.model` is deliberately wider — the
  *  user may add any id to their model list. */

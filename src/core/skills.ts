@@ -25,7 +25,7 @@ export interface SkillEntry {
    *  - `builtin`: shipped by the plugin (the obsidian skill), in its DSH_HOME
    *  - `vault`:   a skill stored for this vault, in that same DSH_HOME's
    *               `skills/` — the one place vault-scoped skills live
-   *  - `custom`:  a folder the user registered in settings, outside the vault
+   *  - `custom`:  a vault-relative folder the user registered in settings
    */
   source: 'vault' | 'custom' | 'builtin';
   /** Absolute directory of the skill (resource base). */
