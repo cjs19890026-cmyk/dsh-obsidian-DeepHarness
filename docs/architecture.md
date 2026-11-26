@@ -1,6 +1,6 @@
 # 架构 — DeepHarness
 
-> 状态：living document，最后核对 **2026-11-26**（0.1.8 / 合并基线 `f60d71d`；此后 HEAD 以 git log 为准）。
+> 状态：living document，最后核对 **2026-11-26**（0.1.8 / R1/R2/F1/F2 手测后合入 main；此后 HEAD 以 git log 为准）。
 > 代码是最终事实源；本文解释**为什么这样分层、哪些不能碰、债在哪里**。
 > 任务与优先级见 [`roadmap.md`](roadmap.md)，命令与流程见 [`development.md`](development.md)。
 

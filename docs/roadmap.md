@@ -1,7 +1,7 @@
 # Roadmap — DeepHarness
 
 > **唯一任务与优先级来源。** 状态只写在这里；架构写 [`architecture.md`](architecture.md)，命令写 [`development.md`](development.md)。
-> 最后更新：2026-11-26（0.1.8 / 合并基线 `f60d71d` / 323 tests；此后 HEAD 以 git log 为准）。
+> 最后更新：2026-11-26（0.1.8 / R1/R2/F1/F2 手测后合入 main / 323 tests；此后 HEAD 以 git log 为准）。
 
 ## 1. 方向：从“聊天面板”到“可信的 vault 工作流 agent”
 
@@ -24,7 +24,7 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 | 项 | 值 |
 |---|---|
 | 版本 | 0.1.8（`package.json` / `manifest.json`） |
-| 分支 | `main`，合并基线 `f60d71d`（28 个提交已合入）；当前工作分支 `feat/trusted-run-and-selection` |
+| 分支 | `main`；R1/R2/F1/F2 手测后合入（HEAD 以 git log 为准） |
 | 测试 | 323 passed / 2 skipped（19 文件） |
 | 已有能力 | 聊天、流式 thinking/tool、停止/超时、历史/恢复、@提及、当前笔记引用、技能、模型/推理/权限、i18n、诊断、更新检查 |
 | 已知缺口 | 无批量队列；无原生会话续跑；无预写确认；ChatView 1489 行 / DshRunner 994 行仍偏大 |
