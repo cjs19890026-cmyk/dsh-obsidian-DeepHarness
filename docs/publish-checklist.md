@@ -15,7 +15,7 @@
 - [ ] `isDesktopOnly: true`（使用 Node/Electron API）
 - [ ] 命令 id 不含插件 id（`open-harness-chat` / `ask-active-note`，Obsidian 自动加前缀）
 - [ ] `LICENSE`（MIT）、英文 `README.md` + 中文 `readme-ch.md`
-- [ ] `npm run build` production 构建通过，**340 tests 全过**（以当次实测为准）
+- [ ] `npm run build` production 构建通过，**343 tests 全过**（以当次实测为准）
 - [ ] 四项验证通过：`npm test` / `npx tsc --noEmit` / `npm run build` / `npx eslint "src/**/*.ts"`
 - [ ] 手工测试清单至少走一遍（[`development.md`](development.md) §5）
 - [ ] `package.json`、`manifest.json`、`package-lock.json` 根 version 一致

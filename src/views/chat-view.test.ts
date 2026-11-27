@@ -187,6 +187,54 @@ describe('ChatView conversation context', () => {
     expect(task).toContain('ARCHIVED_SECOND_LINE');
   });
 
+  it.each([true, false])(
+    'keeps the beginning of a long resumed session (memoryEnabled=%s)',
+    async (memoryEnabled) => {
+      // A resumed session must carry all turns, not just the last five. The
+      // early marker is deliberately in turn 1 of 12; with memoryEnabled=false
+      // it must still be present because an explicit resume overrides the
+      // automatic-memory toggle.
+      const app = makeAppDouble();
+      appSlot.current = app;
+      const plugin = makePluginDouble(app);
+      plugin.settings.memoryEnabled = memoryEnabled;
+      const turns = Array.from({ length: 12 }, (_, i) => ({
+        ts: i,
+        user: i === 0 ? 'EARLY_MARKER_WITH_GOALS_AND_CONSTRAINTS' : `question ${i}`,
+        answer: i === 0 ? 'answer zero' : `answer ${i}`,
+        durationMs: 1,
+        status: 'succeeded' as const,
+        tools: i === 0 ? [{ name: 'read_note', args: 'note.md', ok: true }] : undefined,
+        changedFiles: i === 0 ? ['note.md'] : undefined,
+      }));
+      (plugin.history as unknown as Record<string, unknown>).activateSession = async () => ({
+        id: 's1',
+        title: 'Long archived session',
+        startedAt: 0,
+        endedAt: 1,
+        model: 'deepseek-flash',
+        effort: 'high',
+        permission: 'workspace-write',
+        turns,
+        pinned: false,
+        note: '',
+      });
+      const view = new ChatView({} as never, plugin as never);
+      await view.onOpen();
+      await (view as unknown as { resumeSession(s: unknown): Promise<void> }).resumeSession({ id: 's1' });
+
+      const task = await captureNextTaskText(view);
+      expect(task).toContain('EARLY_MARKER_WITH_GOALS_AND_CONSTRAINTS');
+      expect(task).toContain('read_note');
+      expect(task).toContain('note.md');
+      expect(task).toContain('question 11');
+
+      // The digest must survive follow-ups, not just the first send.
+      const followUp = await captureNextTaskText(view);
+      expect(followUp).toContain('EARLY_MARKER_WITH_GOALS_AND_CONSTRAINTS');
+    },
+  );
+
   it('carries a full multi-line answer, not just its first line', async () => {
     // The bug: memory kept `answer.split('\n')[0].slice(0, 200)`, so everything
     // after the first line was silently dropped when a session was resumed.

@@ -1,7 +1,7 @@
 # Roadmap — DeepHarness
 
 > **唯一任务与优先级来源。** 状态只写在这里；架构写 [`architecture.md`](architecture.md)，命令写 [`development.md`](development.md)。
-> 最后更新：2026-11-27（F3/F4 真实 vault 手测通过并合入 main；340 tests；此后 HEAD 以 git log 为准）。
+> 最后更新：2026-11-27（F3/F4 真实 vault 手测通过并合入 main；343 tests；此后 HEAD 以 git log 为准）。
 
 ## 1. 方向：从“聊天面板”到“可信的 vault 工作流 agent”
 
@@ -25,9 +25,9 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 |---|---|
 | 版本 | 0.2.0（`package.json` / `manifest.json` / `package-lock.json`） |
 | 分支 | `main`；R1/R2/F1/F2/F3/F4 手测后合入（HEAD 以 git log 为准） |
-| 测试 | 340 passed / 2 skipped（22 文件） |
+| 测试 | 343 passed / 2 skipped（22 文件） |
 | 已有能力 | 聊天、流式 thinking/tool、停止/超时、历史/恢复、@提及、当前笔记引用、技能、模型/推理/权限、i18n、诊断、更新检查 |
-| 已知缺口 | 批量仅多选笔记（无文件夹/搜索结果队列）；无原生会话续跑；无预写确认；ChatView 1590 行 / DshRunner 988 行仍偏大 |
+| 已知缺口 | 批量仅多选笔记（无文件夹/搜索结果队列）；无原生会话续跑（恢复仍靠 digest + 最近轮次）；无预写确认；ChatView 1726 行 / DshRunner 999 行仍偏大 |
 
 ## 3. 规划原则
 
@@ -201,7 +201,8 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 | 2026-11-26 | RunController 放 `src/views/`，只持有状态 + AbortSignal | 不扩大改动面；client/stream/history 仍由 ChatView 编排，先修 stuck-Stop |
 | 2026-11-26 | 变更审阅采用运行前后 Markdown 快照，直接实现为 F2 | git 模式只覆盖 git vault；工具事件拿不到写前内容；只读模式不能替代撤销 |
 | 2026-11-26 | `feat/trusted-run-and-selection` 手测通过后合入 `main` | R1/R2/F1/F2 四项验证 + 真人测试通过；0.2.0 从 main 继续 |
-| 2026-11-27 | F3/F4 代码完成，进入真实 vault 手测 | 340 tests / tsc / build / eslint 通过；批量/历史 UI 需真人验收后才标 done |
+| 2026-11-27 | F3/F4 代码完成，进入真实 vault 手测 | 343 tests / tsc / build / eslint 通过；批量/历史 UI 需真人验收后才标 done |
 | 2026-11-27 | L1 会话连续性 spike：0.2.0 不做 | headless 无 resume；自定义 profile 成本高、上游可能补齐；保留记忆+transcript |
 | 2026-11-27 | F3/F4 真实 vault 手测通过并合入 `main` | 批量多选/取消/审阅/历史与历史筛选/复制均走通；作为 0.2.0 的候选内容 |
 | 2026-11-27 | 进入 0.2.0 发布准备 | bump 三处 version、写 0.2.0 release notes；tag/Release 待用户确认 |
+| 2026-11-27 | P0 修复“历史恢复丢上下文” | 恢复会话 = transcript + 最近 5 轮 + 较早轮次 digest；显式恢复不受 memoryEnabled 影响；343 tests 通过；0.2.0 发布继续暂停 |

@@ -937,10 +937,21 @@ export class DshRunner {
     ].join('\n');
   }
 
-  /** Assemble the final task text handed to `dsh --profile headless`. */
-  buildTask(userMessage: string, memory: string[], extraContext?: string): string {
+  /**
+   * Assemble the final task text handed to `dsh --profile headless`.
+   *
+   * `forceMemory` is for explicitly resumed sessions: the user asked to
+   * continue that conversation, so its context must not be silently dropped
+   * when the automatic-memory setting is off.
+   */
+  buildTask(
+    userMessage: string,
+    memory: string[],
+    extraContext?: string,
+    options: { forceMemory?: boolean } = {},
+  ): string {
     const parts: string[] = [];
-    if (this.settings.memoryEnabled && memory.length > 0) {
+    if ((this.settings.memoryEnabled || options.forceMemory) && memory.length > 0) {
       parts.push(memory.join('\n'));
     }
     if (extraContext && extraContext.trim()) {

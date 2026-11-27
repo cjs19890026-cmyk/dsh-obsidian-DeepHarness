@@ -22,9 +22,9 @@ DeepHarness 是 Obsidian 桌面插件（id `deepharness`），把 **DeepSeek Har
 |---|---|
 | 默认分支 | `main`；F3/F4 手测后合入（HEAD 以 git log 为准） |
 | 版本 | `package.json` / `manifest.json` = `0.2.0` |
-| 测试 | `npm test` → **340 passed / 2 skipped**（22 个测试文件） |
+| 测试 | `npm test` → **343 passed / 2 skipped**（22 个测试文件） |
 | 类型 | `npx tsc --noEmit` 通过 |
-| 构建 | `npm run build` 通过（`dist/main.js` ≈168 KB） |
+| 构建 | `npm run build` 通过（`dist/main.js` ≈172 KB） |
 | Lint | `npx eslint "src/**/*.ts"` → 0 errors / 9 warnings（已知基线，不要新增） |
 | 运行时 | Node 22（CI），Obsidian 1.13+，桌面端 only |
 
@@ -110,7 +110,7 @@ npm ci --cache "$(pwd)/.npm-cache"
 - **Windows**：路径分隔符、npm shim（`.cmd`/`.ps1`）解析、`file://` relay URL；不要写死 `/`。
 - **Node/Electron**：Obsidian 渲染进程有 `window`，单测 Node 没有；定时器/`globalThis` 要兼容。
 - **esbuild**：Node builtins 必须 external；新增依赖先确认能在 Electron 渲染进程运行。
-- **历史/会话**：当前没有原生 `--session` 续跑；恢复会话是“重建记忆 + transcript”，不是恢复 DSH 进程。别在 UI 上承诺后者。
+- **历史/会话**：当前没有原生 `--session` 续跑；恢复会话是“transcript + 最近 5 轮 + 较早轮次 digest”的文本重建，不是恢复 DSH 进程。别在 UI 上承诺后者。
 
 ## 8. Git / 环境
 

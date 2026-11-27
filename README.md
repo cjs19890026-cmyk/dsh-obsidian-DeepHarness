@@ -68,7 +68,7 @@ npm run build
 - 🧠 **Model list you own**: the model dropdown is fed by an editable list, so a model DeepSeek ships after this plugin release can be added by typing its id — no plugin update needed. **Import from DSH** pulls in the ids your own DSH settings declare, only when you press it. Defaults to `deepseek-flash`
 - ⚙️ **Reasoning effort (Thinking)**: switch **off / high / max** in the toolbar; written to the plugin-owned DSH_HOME, credentials are symlinked from `~/.dsh`
 - ⏹ **Stop button** (SIGTERM) and a timeout fallback (default 10 minutes)
-- 📝 **Conversation memory**: key points from earlier turns are refilled into new tasks
+- 📝 **Conversation memory**: key points from earlier turns are refilled into new tasks; a resumed session also carries a compressed digest of its earlier turns, even if automatic memory is off
 - ✍️ **Selection actions**: select text → **rewrite / summarize / explain / custom**; preview the result, then replace the selection or insert it below — nothing is written until you confirm
 - 🔍 **Review & undo**: after a run, see the Markdown files that changed with a compact diff; undo one file or the whole run, no git required
 - 🗂 **Batch across notes**: pick multiple notes and run one instruction sequentially — per-item status, cancel anytime, failures don't stop the batch, one review/undo at the end

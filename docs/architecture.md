@@ -1,6 +1,6 @@
 # 架构 — DeepHarness
 
-> 状态：living document，最后核对 **2026-11-27**（0.1.8 / R1–R4 + F1–F4 代码完成；F3/F4 待在真实 vault 手测；此后 HEAD 以 git log 为准）。
+> 状态：living document，最后核对 **2026-11-27**（0.2.0 发布准备；R1–R4 + F1–F4 已完成；P0 恢复上下文修复已合入代码；tag 未发）。
 > 代码是最终事实源；本文解释**为什么这样分层、哪些不能碰、债在哪里**。
 > 任务与优先级见 [`roadmap.md`](roadmap.md)，命令与流程见 [`development.md`](development.md)。
 
@@ -111,7 +111,7 @@ DSH child process
 
 1. **触发**：用户点发送；或 “Process current note” 预填输入（`setPendingInput`，仍需用户发送）；或 `ask-selection` 命令先选动作，再自动发送选区 prompt。
 2. **同步门禁**：`RunController.canStart()` 为真才继续；`start()` 置 `preparing`、新建 `AbortController`，清编辑器、渲染 user 消息、按钮变 Stop。第二个发送在 active 状态被拒绝并提示 busy。
-3. **准备（`prepareRun`）**：探测 bin/node/script、组装 task、写 vault patch / skill-dirs / 插件 DSH_HOME、种子技能与 memory、解析 workdir。硬失败 → `run.fail()` 并清选区请求；降级问题收集为 `PreparationIssue[]`，运行前一次性展示。
+3. **准备（`prepareRun`）**：探测 bin/node/script、组装 task、写 vault patch / skill-dirs / 插件 DSH_HOME、种子技能与 memory、解析 workdir。组装 task 时带最近 5 轮 memory；若当前视图是恢复的会话，再带一份“较早轮次 digest”（最多 4000 字符，含工具/改动文件/失败原因），且不受 `memoryEnabled` 影响。硬失败 → `run.fail()` 并清选区请求；降级问题收集为 `PreparationIssue[]`，运行前一次性展示。
 4. **运行前快照（F2）**：非选区运行先 `snapshotVault()`（仅 Markdown，默认最多 2000 个文件、单文件 512KB、总计 64MB；超限标记 incomplete）。选区运行跳过，避免与预览弹窗叠加。
 5. **执行（`DshClient.run`）**：传 `task/cwd/dshHome/apiKey/provider/toolsMode/permissionMode/patchPath/timeoutMs/signal/onStdoutLine`；child 注册；超时/abort 触发 kill。`RunController.markRunning()` 只在 `preparing` 且 handle 仍当前时成功。
 6. **流式**：stdout 逐行 → `parseDshEventLine` → thinking 累积 / tool 行创建与更新；最终 answer = `parseHeadlessOutput(stdout)`（去掉所有 DLEVENT 行）。
@@ -187,11 +187,11 @@ DLEVENT\t{"t":"tool","status":"result","id":"...","ok":true,"summary":"..."}
 
 | # | 债 | 影响 | 处理 |
 |---|---|---|---|
-| 1 | `ChatView` 1590 行，UI + 编排 + 记忆 + 持久化 + 选区/审阅/批量门禁接线 | 改动冲突面大，多 agent 难并行 | 下一步按需抽 MessageListRenderer/Composer；不要大爆炸 |
-| 2 | `DshRunner` 988 行，6 类职责 | 单测 setup 成本高 | 按需拆 service；不在近期大拆 |
+| 1 | `ChatView` 1726 行，UI + 编排 + 记忆 + 持久化 + 选区/审阅/批量门禁接线 | 改动冲突面大，多 agent 难并行 | 下一步按需抽 MessageListRenderer/Composer；不要大爆炸 |
+| 2 | `DshRunner` 999 行，6 类职责 | 单测 setup 成本高 | 按需拆 service；不在近期大拆 |
 | 3 | stream relay 是 `dsh-runner.ts:254` 模板字符串 | 无法 lint/独立测试，改错只能靠生成后比对 | 低风险时抽成 asset + 字节快照测试 |
 | 4 | `dsh-runner.ts:8` / `chat-view.ts:10` 从 `settings/index` 反向取类型/常量 | 分层不纯，循环依赖风险 | 改从 `settings/types` / `validate` 导入 |
-| 5 | 没有原生会话续跑 | “恢复会话”只是重建记忆 + transcript | 先 spike `dsh --profile tui --resume`；不承诺 |
+| 5 | 没有原生会话续跑 | “恢复会话”是 transcript + 最近 5 轮 + 较早轮次 digest，不是恢复 DSH 进程；超长会话仍受 digest 预算限制 | 先 spike `dsh --profile tui --resume`；不承诺 |
 | 6 | 变更审阅在每次运行前全量读 Markdown（上限 2000 文件 / 512KB / 64MB） | 大 vault 有启动延迟；超限只能提示 incomplete | 观察真实 vault 耗时；需要时改成按 workdir 或事件驱动 |
 | 7 | diff 是“公共前后缀 + 单块”表示，不是完整 Myers diff | 多处分散编辑只显示首尾变更 | MVP 可接受；用户反馈后再升级 |
 | 8 | `DshRunner` 构造时捕获 settings 对象引用 | 当前 `loadSettings` 只在 onload 替换一次，暂安全；未来热重载会失效 | 改成 getter 或每次运行新建 |

@@ -131,6 +131,14 @@ describe('DshRunner.buildTask and workdir', () => {
       expect(task).toBe('do the work');
     });
 
+    it('forces memory for an explicitly resumed session', () => {
+      settings.memoryEnabled = false;
+      const task = runner.buildTask('do the work', ['Memory one'], undefined, {
+        forceMemory: true,
+      });
+      expect(task).toBe('Memory one\n\ndo the work');
+    });
+
     it('omits memory when the memory list is empty', () => {
       settings.memoryEnabled = true;
       const task = runner.buildTask('do the work', []);

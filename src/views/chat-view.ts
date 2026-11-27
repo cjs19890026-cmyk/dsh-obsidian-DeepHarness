@@ -11,7 +11,7 @@ import { REASONING_OPTIONS, PERMISSION_OPTIONS, permissionLabel, type Permission
 import { modelDisplayLabel, modelOptionsWithCurrent } from '../settings/validate';
 import { ContextMeter, estimateTokens } from '../core/context-meter';
 import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir, frontmatterAliases, partialTurnAnswer, stripCodeFence } from '../dsh/pure';
-import { HistoryTool, type HistoryRunStatus } from '../core/history';
+import { HistoryTool, type HistoryRunStatus, type HistoryTurn } from '../core/history';
 import { MentionSuggest } from './mention';
 import { ChipEditor } from './chip-editor';
 import { HistoryPanel } from './history-panel';
@@ -54,18 +54,29 @@ const QUOTE_TRUNCATE_LIMIT = 300;
  * therefore looked like it worked while actually starting from scratch.
  */
 const MEMORY_CONTEXT = {
-  /** How many previous turns are carried into one task. */
+  /** How many previous turns are carried into one task in full. */
   turns: 5,
   /**
-   * Per-turn character budget: the two together stay around 15k characters —
-   * a few thousand tokens, comfortable even for the smallest supported context
-   * window, and bounded so a long session cannot grow without limit.
+   * Per-turn character budget for recent turns. Older turns of a resumed
+   * session are folded into a separate digest (resumeDigestChars) so the
+   * beginning of a long conversation is not silently dropped.
    */
   userChars: 1500,
   assistantChars: 2500,
   /** Turns kept in the in-memory window (history.json keeps the full record). */
   retainTurns: 20,
+  /** Character budget for the compressed digest of pre-window resumed turns. */
+  resumeDigestChars: 4000,
+  /** Per-turn caps inside that digest (one line per older turn). */
+  resumeUserChars: 240,
+  resumeAssistantChars: 360,
 } as const;
+
+/** Fold whitespace so a digest entry stays on one line. */
+function clipForDigest(text: string, max: number): string {
+  const normalized = text.replace(/\s+/g, ' ').trim();
+  return normalized.length > max ? `${normalized.slice(0, max)}…` : normalized;
+}
 
 interface MemoryTurn {
   user: string;
@@ -168,6 +179,15 @@ export class ChatView extends ItemView {
   private statusTimer: number | null = null;
   private statusStartedAt = 0;
   private memory: MemoryTurn[] = [];
+  /**
+   * Digest of the turns older than the recent-memory window, built when a
+   * session is resumed. Kept for the rest of that session so every follow-up
+   * still sees the beginning of the conversation, not just the last 5 turns.
+   */
+  private resumeContext: string[] = [];
+  /** True once this view has resumed an archived session. Explicitly resumed
+   *  conversations carry context even when automatic memory is disabled. */
+  private resumed = false;
   private contextMeter: ContextMeter | null = null;
   private settingsUnsub: (() => void) | null = null;
   private localeUnsub: (() => void) | null = null;
@@ -522,6 +542,8 @@ export class ChatView extends ItemView {
     this.mention?.close();
     this.skillSuggest?.close();
     this.memory = [];
+    this.resumeContext = [];
+    this.resumed = false;
     this.contextMeter?.reset();
     this.messagesContainer.empty();
     this.showWelcome();
@@ -570,7 +592,12 @@ export class ChatView extends ItemView {
     if (!dshScript) return fail('chat.dshNotNodeScriptTitle', 'chat.dshNotNodeScript');
 
     const vaultRoot = this.plugin.getVaultRoot();
-    const task = this.runner.buildTask(message, this.buildMemorySummary());
+    const task = this.runner.buildTask(
+      message,
+      this.buildMemorySummary(),
+      undefined,
+      { forceMemory: this.resumed },
+    );
     // Context meter: account for this turn's prompt (system persona +
     // assembled task) right when it is sent.
     if (this.contextMeter) {
@@ -1067,14 +1094,96 @@ export class ChatView extends ItemView {
    * here.
    */
   private buildMemorySummary(): string[] {
-    if (this.memory.length === 0) return [];
-    const recent = this.memory.slice(-MEMORY_CONTEXT.turns);
-    const lines = [t('chat.memoryHeader')];
-    for (const turn of recent) {
-      lines.push(`- ${t('chat.memoryUser')}${turn.user}`);
-      if (turn.assistant) lines.push(`  ${t('chat.memoryAssistant')}${turn.assistant}`);
+    const blocks: string[] = [];
+    // Resumed sessions keep a digest of everything before the recent window.
+    // It stays for the rest of the session, not just the first follow-up:
+    // DSH is stateless, so every task needs the whole carried context.
+    if (this.resumeContext.length > 0) {
+      blocks.push(this.resumeContext.join('\n'));
     }
-    return [lines.join('\n')];
+    if (this.memory.length > 0) {
+      const recent = this.memory.slice(-MEMORY_CONTEXT.turns);
+      const lines = [t('chat.memoryHeader')];
+      for (const turn of recent) {
+        lines.push(`- ${t('chat.memoryUser')}${turn.user}`);
+        if (turn.assistant) lines.push(`  ${t('chat.memoryAssistant')}${turn.assistant}`);
+      }
+      blocks.push(lines.join('\n'));
+    }
+    return blocks;
+  }
+
+  /**
+   * Compress the turns that fall outside the recent-memory window into a
+   * bounded digest. Without this a resumed 10-turn session only carried its
+   * last 5 turns: the visible transcript looked complete, but the beginning
+   * (goals, constraints, earlier files) was invisible to the agent.
+   */
+  private buildResumeDigest(turns: readonly HistoryTurn[]): string[] {
+    const olderCount = Math.max(0, turns.length - MEMORY_CONTEXT.turns);
+    if (olderCount === 0) return [];
+
+    const entries = turns
+      .slice(0, olderCount)
+      .map((turn) => this.formatResumeDigestEntry(turn));
+    const header = t('chat.resumeDigestHeader');
+    const total = header.length + entries.reduce((sum, entry) => sum + entry.length + 1, 0);
+
+    let selected = entries;
+    if (total > MEMORY_CONTEXT.resumeDigestChars) {
+      // Keep the beginning (where goals/constraints usually live) and as many
+      // of the newest older turns as fit; drop the middle first.
+      const first = entries.slice(0, 2);
+      const tail: string[] = [];
+      let used = header.length + first.reduce((sum, entry) => sum + entry.length + 1, 0);
+      for (let i = entries.length - 1; i >= first.length; i -= 1) {
+        const entry = entries[i];
+        if (used + entry.length + 1 > MEMORY_CONTEXT.resumeDigestChars) break;
+        tail.unshift(entry);
+        used += entry.length + 1;
+      }
+      const omitted = entries.length - first.length - tail.length;
+      selected = [
+        ...first,
+        ...(omitted > 0
+          ? [t('chat.resumeDigestOmitted', { count: String(omitted) })]
+          : []),
+        ...tail,
+      ];
+    }
+
+    return [[header, ...selected].join('\n')];
+  }
+
+  private formatResumeDigestEntry(turn: HistoryTurn): string {
+    const lines = [
+      `- ${t('chat.memoryUser')}${clipForDigest(turn.user, MEMORY_CONTEXT.resumeUserChars)}`,
+    ];
+    const answer = turn.answer?.trim();
+    if (answer) {
+      lines.push(`  ${t('chat.memoryAssistant')}${clipForDigest(answer, MEMORY_CONTEXT.resumeAssistantChars)}`);
+    }
+    const meta: string[] = [];
+    if (turn.tools && turn.tools.length > 0) {
+      const tools = turn.tools
+        .map((tool) => `${tool.name}${tool.ok ? '' : t('chat.resumeToolFailed')}`)
+        .join(', ');
+      meta.push(`${t('chat.resumeTools')}${tools}`);
+    }
+    if (turn.changedFiles && turn.changedFiles.length > 0) {
+      const files = turn.changedFiles.slice(0, 8).join(', ');
+      const more = turn.changedFiles.length > 8
+        ? t('chat.resumeFilesMore', { count: String(turn.changedFiles.length - 8) })
+        : '';
+      meta.push(`${t('chat.resumeFiles')}${files}${more}`);
+    }
+    if (turn.status && turn.status !== 'succeeded') {
+      const status = t(`history.status.${turn.status}` as TranslationKey);
+      const error = turn.error ? `: ${clipForDigest(turn.error, 120)}` : '';
+      meta.push(`${t('chat.resumeStatus')}${status}${error}`);
+    }
+    if (meta.length > 0) lines.push(`  ${meta.join('; ')}`);
+    return lines.join('\n');
   }
 
   /** Parse a dsh stderr line: `dsh: CODE: message`, mapping known codes to hints. */
@@ -1491,6 +1600,8 @@ export class ChatView extends ItemView {
     // Rebuild the conversation context from the archived turns. Without this the
     // resumed session would look right but answer as if nothing had been said:
     // the agent only ever sees what buildMemorySummary() carries into the task.
+    this.resumed = true;
+    this.resumeContext = this.buildResumeDigest(activated.turns);
     this.memory = activated.turns
       .slice(-MEMORY_CONTEXT.retainTurns)
       .map((t) => makeMemoryTurn(t.user, t.answer));
@@ -1503,6 +1614,13 @@ export class ChatView extends ItemView {
     this.contextMeter?.reset();
     this.scrollToBottom();
     new Notice(t('chat.resumed', { title: activated.title }));
+    const olderCount = Math.max(0, activated.turns.length - MEMORY_CONTEXT.turns);
+    if (olderCount > 0) {
+      new Notice(t('chat.resumedCompressed', { count: String(olderCount) }), 6000);
+    }
+    if (!this.plugin.settings.memoryEnabled) {
+      new Notice(t('chat.resumeMemoryForced'), 6000);
+    }
   }
 
   // ── Floating panels (see floating-panel.ts / *-panel.ts) ───────────
