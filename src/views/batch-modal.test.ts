@@ -97,4 +97,14 @@ describe('BatchProgressModal', () => {
     modal.close();
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
+
+  it('enables close after an error or cancellation', () => {
+    const modal = new BatchProgressModal(app, vi.fn());
+    modal.open();
+    modal.setError('cancelled');
+    const close = buttons().find((b) => b.textContent === 'Close')!;
+    expect(close.disabled).toBe(false);
+    close.click();
+    expect(document.body.textContent).not.toContain('a.md');
+  });
 });

@@ -23,7 +23,7 @@ npm ci --cache "$(pwd)/.npm-cache"
 
 | 命令 | 作用 |
 |---|---|
-| `npm test` | 全量 Vitest（当前基线 339 passed / 2 skipped，22 文件） |
+| `npm test` | 全量 Vitest（当前基线 340 passed / 2 skipped，22 文件） |
 | `npx tsc --noEmit` | 类型检查 |
 | `npm run build` | 生产构建到 `dist/`（main.js + manifest.json + styles.css） |
 | `npm run dev` | 非压缩构建（**只构建一次，不是 watch**） |

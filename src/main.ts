@@ -359,21 +359,36 @@ export default class DshPlugin extends Plugin {
     progress.open();
     let client: DshClient | null = null;
     let sessionStarted = false;
+    let progressSettled = false;
     try {
       const runner = new DshRunner(this.settings, this.app.vault.configDir);
       const prepared = await prepareBatchEnvironment(runner, this.getVaultRoot(), this.settings);
       if (!prepared.ok) {
         progress.setError(prepared.error);
+        progressSettled = true;
         return;
       }
       if (prepared.issues.length > 0) {
         new Notice(prepared.issues.slice(0, 3).join('\n'), 8000);
       }
-      if (cancelled) return;
+      if (cancelled) {
+        progress.setError(t('batch.cancelled'));
+        progressSettled = true;
+        return;
+      }
       const before = await snapshotVault(this.app);
-      if (cancelled) return;
+      if (cancelled) {
+        progress.setError(t('batch.cancelled'));
+        progressSettled = true;
+        return;
+      }
       await this.history?.beginSession(t('batch.sessionTitle', { count: paths.length }));
       sessionStarted = true;
+      if (cancelled) {
+        progress.setError(t('batch.cancelled'));
+        progressSettled = true;
+        return;
+      }
 
       client = new DshClient();
       const executor = new BatchExecutorImpl(client, runner, this.settings, prepared.env, instruction);
@@ -420,10 +435,13 @@ export default class DshPlugin extends Plugin {
           await undoChange(this.app, change);
         }).open();
       }
-      if (!cancelled) progress.finish(result, changes.length);
+      progress.finish(result, changes.length);
+      progressSettled = true;
     } catch (e) {
       progress.setError(e instanceof Error ? e.message : String(e));
+      progressSettled = true;
     } finally {
+      if (!progressSettled) progress.setError(t('batch.cancelled'));
       if (sessionStarted) await this.history?.endSession().catch(() => {});
       this.batchController = null;
       this.batchRunning = false;
