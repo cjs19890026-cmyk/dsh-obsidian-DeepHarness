@@ -138,17 +138,40 @@ describe('ChatView conversation context', () => {
 
   /** The text the agent is actually spawned with, for the next send. */
   async function captureNextTaskText(view: ChatView): Promise<string> {
-    const client = (view as unknown as { client: { run(task: string, opts: unknown): Promise<unknown> } }).client;
+    type TestView = {
+      client: { run(task: string, opts: unknown): Promise<unknown> };
+      editor: { setText(t: string): void };
+      sendMessage(): Promise<void>;
+      buildMemorySummary(): string[];
+      resumed: boolean;
+      runner: { buildTask(message: string, memory: string[], extra: undefined, options: { forceMemory: boolean }): string };
+      prepareRun(message: string): Promise<unknown>;
+    };
+    const testView = view as unknown as TestView;
     let task = '';
-    client.run = async (t: string): Promise<unknown> => {
+    testView.client.run = async (t: string): Promise<unknown> => {
       task = t;
       return { exitCode: 0, stdout: 'ok', stderr: '', durationMs: 1, killReason: null };
     };
-    // The run path touches the DOM and the runner; only the task text matters
-    // here, so keep the editor usable and send.
+    // Keep this test hermetic: CI has no `dsh` binary, so the real prepareRun
+    // would stop before spawning. Build the same task text locally and skip
+    // the environment preparation; prepareRun has its own tests below.
+    testView.prepareRun = async (message: string): Promise<unknown> => ({
+      ok: true,
+      issues: [],
+      bin: 'dsh',
+      nodeBin: 'node',
+      dshScript: '/tmp/dsh.js',
+      task: testView.runner.buildTask(message, testView.buildMemorySummary(), undefined, {
+        forceMemory: testView.resumed,
+      }),
+      dshHome: '/tmp/dsh-home',
+      workdir: '/tmp',
+      patchPaths: [],
+    });
     // A real message must be in the editor or sendMessage() returns early.
-    (view as unknown as { editor: { setText(t: string): void } }).editor.setText('follow-up question');
-    await (view as unknown as { sendMessage(): Promise<void> }).sendMessage();
+    testView.editor.setText('follow-up question');
+    await testView.sendMessage();
     return task;
   }
 
