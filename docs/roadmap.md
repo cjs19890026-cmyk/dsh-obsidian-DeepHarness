@@ -1,7 +1,7 @@
 # Roadmap — DeepHarness
 
 > **唯一任务与优先级来源。** 状态只写在这里；架构写 [`architecture.md`](architecture.md)，命令写 [`development.md`](development.md)。
-> 最后更新：2026-11-27（F3/F4 代码与自动测试完成，待在真实 vault 手测；340 tests；此后 HEAD 以 git log 为准）。
+> 最后更新：2026-11-27（F3/F4 真实 vault 手测通过并合入 main；340 tests；此后 HEAD 以 git log 为准）。
 
 ## 1. 方向：从“聊天面板”到“可信的 vault 工作流 agent”
 
@@ -24,10 +24,10 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 | 项 | 值 |
 |---|---|
 | 版本 | 0.1.8（`package.json` / `manifest.json`） |
-| 分支 | `main`；R1/R2/F1/F2 手测后合入（HEAD 以 git log 为准） |
+| 分支 | `main`；R1/R2/F1/F2/F3/F4 手测后合入（HEAD 以 git log 为准） |
 | 测试 | 340 passed / 2 skipped（22 文件） |
 | 已有能力 | 聊天、流式 thinking/tool、停止/超时、历史/恢复、@提及、当前笔记引用、技能、模型/推理/权限、i18n、诊断、更新检查 |
-| 已知缺口 | 无批量队列；无原生会话续跑；无预写确认；ChatView 1489 行 / DshRunner 994 行仍偏大 |
+| 已知缺口 | 批量仅多选笔记（无文件夹/搜索结果队列）；无原生会话续跑；无预写确认；ChatView 1590 行 / DshRunner 988 行仍偏大 |
 
 ## 3. 规划原则
 
@@ -97,19 +97,19 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 - 验收：7 个 tracker 单测 + 4 个 modal 单测 + 1 个 ChatView 集成测试通过；2026-11-26 用户在真实 vault 手测逐文件/全部撤销通过。
 - 已知限制：diff 是公共前后缀 + 单块，不覆盖分散多处编辑；运行前全量读 Markdown 的耗时待真实 vault 观察。
 
-### F3. 运行历史/审计（P1）— in progress（代码+自动测试完成，真实 vault 手测待）
+### F3. 运行历史/审计（P1）— done（2026-11-27，真实 vault 手测通过）
 
 - `HistoryTurn` 已增加 `status/model/effort/permission/changedFiles/exitCode/killReason/error`；成功/失败/取消/超时/中断都落历史；工具记录不再受 `showTools` 显示开关影响。
 - 历史面板已支持按标题/备注筛选、7/30 天范围、展开详情（turns/耗时/工具/文件/错误/逐轮状态）和复制摘要。
 - 验收：一次真实运行后，历史里能看到工具与文件；重开 Obsidian 仍在。
-- 2026-11-27 状态：`src/core/history.ts` + `src/views/chat-view.ts` + `src/views/history-panel.ts` 已完成；9 个 history 单测、7 个主链路测试、14 个面板测试通过。
+- 2026-11-27 状态：`src/core/history.ts` + `src/views/chat-view.ts` + `src/views/history-panel.ts` 已完成；9 个 history 单测、7 个主链路测试、14 个面板测试通过；用户真实 vault 手测通过。
 
-### F4. 批量队列（P1）— in progress（代码+自动测试完成，真实 vault 手测待）
+### F4. 批量队列（P1）— done（2026-11-27，真实 vault 手测通过）
 
 - 入口：先做**多选笔记**（`batch-notes` 命令 + 搜索/全选/清空），文件夹/搜索结果后放。
 - 行为：顺序执行、逐项状态（pending/running/succeeded/failed/cancelled）、可取消、单项失败不终止整批；整批一次快照、一次结束审阅；整批一个 history session。
 - 验收：10 个笔记的批次可跑完；取消后不再启动新项；每项都有历史记录；ChatView 在批量期间拒绝新运行。
-- 2026-11-27 状态：`src/core/batch-controller.ts` + `src/dsh/batch-runner.ts` + `src/views/batch-modal.ts` + `main.ts` 编排已实现；4 个队列测试、4 个执行器测试、4 个弹窗测试通过。
+- 2026-11-27 状态：`src/core/batch-controller.ts` + `src/dsh/batch-runner.ts` + `src/views/batch-modal.ts` + `main.ts` 编排已实现；4 个队列测试、4 个执行器测试、4 个弹窗测试通过；用户真实 vault 手测通过。
 
 ## 6. Later — 0.3+
 
@@ -151,8 +151,8 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 
 | Workstream |  ownership | 适合并行度 | 备注 |
 |---|---|---|---|
-| Runtime | `src/views/run-controller.ts`、`src/dsh/batch-runner.ts`、`src/dsh/dsh-client.ts`、`src/dsh/dsh-runner.ts`、对应测试 | 1 agent | R1/R2/R4 已完成；F3/F4 待手测；下一步性能收敛 |
-| Workflow UX | `src/views/*`（chat-view、面板、modal）、i18n | 1 agent | F1/F2/F3/F4 已接入；待真实 vault 手测；ChatView 串行 |
+| Runtime | `src/views/run-controller.ts`、`src/dsh/batch-runner.ts`、`src/dsh/dsh-client.ts`、`src/dsh/dsh-runner.ts`、对应测试 | 1 agent | R1/R2/R4 与 F3/F4 已完成；下一步性能收敛 |
+| Workflow UX | `src/views/*`（chat-view、面板、modal）、i18n | 1 agent | F1/F2/F3/F4 已接入并手测；ChatView 串行 |
 | Release/Docs | `docs/*`、README、workflows | 可与上面并行 | 不碰 src；发布前统一验证 |
 | Research | 无生产代码 | 1 agent | R3 已决策；L1 会话连续性 spike 已完成（no-go） |
 
@@ -203,3 +203,4 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 | 2026-11-26 | `feat/trusted-run-and-selection` 手测通过后合入 `main` | R1/R2/F1/F2 四项验证 + 真人测试通过；0.2.0 从 main 继续 |
 | 2026-11-27 | F3/F4 代码完成，进入真实 vault 手测 | 340 tests / tsc / build / eslint 通过；批量/历史 UI 需真人验收后才标 done |
 | 2026-11-27 | L1 会话连续性 spike：0.2.0 不做 | headless 无 resume；自定义 profile 成本高、上游可能补齐；保留记忆+transcript |
+| 2026-11-27 | F3/F4 真实 vault 手测通过并合入 `main` | 批量多选/取消/审阅/历史与历史筛选/复制均走通；作为 0.2.0 的候选内容 |

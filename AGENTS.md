@@ -20,7 +20,7 @@ DeepHarness 是 Obsidian 桌面插件（id `deepharness`），把 **DeepSeek Har
 
 | 项 | 值 |
 |---|---|
-| 默认分支 | `main`（基线 `972c990`）；当前开发分支 `feat/run-audit-and-batch` |
+| 默认分支 | `main`；F3/F4 手测后合入（HEAD 以 git log 为准） |
 | 版本 | `package.json` / `manifest.json` = `0.1.8` |
 | 测试 | `npm test` → **340 passed / 2 skipped**（22 个测试文件） |
 | 类型 | `npx tsc --noEmit` 通过 |
