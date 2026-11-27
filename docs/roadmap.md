@@ -1,7 +1,7 @@
 # Roadmap — DeepHarness
 
 > **唯一任务与优先级来源。** 状态只写在这里；架构写 [`architecture.md`](architecture.md)，命令写 [`development.md`](development.md)。
-> 最后更新：2026-11-26（0.1.8 / R1/R2/F1/F2 手测后合入 main / 323 tests；此后 HEAD 以 git log 为准）。
+> 最后更新：2026-11-27（F3/F4 代码与自动测试完成，待在真实 vault 手测；339 tests；此后 HEAD 以 git log 为准）。
 
 ## 1. 方向：从“聊天面板”到“可信的 vault 工作流 agent”
 
@@ -25,7 +25,7 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 |---|---|
 | 版本 | 0.1.8（`package.json` / `manifest.json`） |
 | 分支 | `main`；R1/R2/F1/F2 手测后合入（HEAD 以 git log 为准） |
-| 测试 | 323 passed / 2 skipped（19 文件） |
+| 测试 | 339 passed / 2 skipped（22 文件） |
 | 已有能力 | 聊天、流式 thinking/tool、停止/超时、历史/恢复、@提及、当前笔记引用、技能、模型/推理/权限、i18n、诊断、更新检查 |
 | 已知缺口 | 无批量队列；无原生会话续跑；无预写确认；ChatView 1489 行 / DshRunner 994 行仍偏大 |
 
@@ -68,15 +68,15 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 - 理由：git 模式只覆盖 git vault；工具事件只能拿到“写后”，不足以撤销；只读/预演不能替代实际撤销。快照模式对所有 vault 一致，成本可控（仅 Markdown + 上限）。
 - 遗留：大 vault 的启动延迟、分散编辑的 diff 可读性，列入 §10 架构债。
 
-### R4. 顺手修（P1）— partial
+### R4. 顺手修（P1）— done（`fb062a5`）
 
 - ✅ `prepareRun` 失败路径的 `running` 泄漏已由 RunController + `finally` 修复，并有回归测试。
 - ✅ 2026-11-26：`src/settings/types.ts:150-152` 的 HANDOFF 引用已改；`src/dsh/dsh-runner.ts:490-499` 的重复错误注释已删；`ensureObsidianSkill` 的旧技能路径注释已修正。
-- ⬜ `dsh-runner.ts` / `chat-view.ts` 从 `settings/index` 的反向依赖改到 `types`/`validate`（低风险，单独 commit，未做）。
+- ✅ `dsh-runner.ts` / `chat-view.ts` 从 `settings/index` 的反向依赖改到 `types`/`validate`（`fb062a5`）。
 
 ## 5. Next — 0.2.0「在笔记里工作」
 
-> F1/F2 已完成并手测通过；0.2.0 剩余 F3/F4。已完成条目保留作验收记录。
+> F1/F2 已完成并手测通过；F3/F4 代码与自动测试完成，待在真实 vault 手测。已完成条目保留作验收记录。
 
 目标：让用户不打开聊天框也能用 agent，并且改动可见、可撤销。
 
@@ -97,17 +97,19 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 - 验收：7 个 tracker 单测 + 4 个 modal 单测 + 1 个 ChatView 集成测试通过；2026-11-26 用户在真实 vault 手测逐文件/全部撤销通过。
 - 已知限制：diff 是公共前后缀 + 单块，不覆盖分散多处编辑；运行前全量读 Markdown 的耗时待真实 vault 观察。
 
-### F3. 运行历史/审计（P1）
+### F3. 运行历史/审计（P1）— in progress（代码+自动测试完成，真实 vault 手测待）
 
-- 历史记录增加：工具调用、改动文件、耗时、模型/权限、成功/失败原因。
-- UI：按会话/时间筛选；不显示凭据；可复制单次运行摘要。
+- `HistoryTurn` 已增加 `status/model/effort/permission/changedFiles/exitCode/killReason/error`；成功/失败/取消/超时/中断都落历史；工具记录不再受 `showTools` 显示开关影响。
+- 历史面板已支持按标题/备注筛选、7/30 天范围、展开详情（turns/耗时/工具/文件/错误/逐轮状态）和复制摘要。
 - 验收：一次真实运行后，历史里能看到工具与文件；重开 Obsidian 仍在。
+- 2026-11-27 状态：`src/core/history.ts` + `src/views/chat-view.ts` + `src/views/history-panel.ts` 已完成；9 个 history 单测、7 个主链路测试、14 个面板测试通过。
 
-### F4. 批量队列（P1）
+### F4. 批量队列（P1）— in progress（代码+自动测试完成，真实 vault 手测待）
 
-- 入口：多选笔记 / 文件夹 / 当前搜索结果（先做一种，别一次全做）。
-- 行为：顺序执行、逐项状态（等待/运行/成功/失败/跳过）、可取消、单项失败不终止整批。
-- 验收：10 个笔记的批次可跑完；取消后不再启动新项；每项都有历史记录。
+- 入口：先做**多选笔记**（`batch-notes` 命令 + 搜索/全选/清空），文件夹/搜索结果后放。
+- 行为：顺序执行、逐项状态（pending/running/succeeded/failed/cancelled）、可取消、单项失败不终止整批；整批一次快照、一次结束审阅；整批一个 history session。
+- 验收：10 个笔记的批次可跑完；取消后不再启动新项；每项都有历史记录；ChatView 在批量期间拒绝新运行。
+- 2026-11-27 状态：`src/core/batch-controller.ts` + `src/dsh/batch-runner.ts` + `src/views/batch-modal.ts` + `main.ts` 编排已实现；4 个队列测试、4 个执行器测试、4 个弹窗测试通过。
 
 ## 6. Later — 0.3+
 
@@ -148,8 +150,8 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 
 | Workstream |  ownership | 适合并行度 | 备注 |
 |---|---|---|---|
-| Runtime | `src/views/run-controller.ts`、`src/dsh/dsh-client.ts`、`src/dsh/dsh-runner.ts`、对应测试 | 1 agent | R1/R2 已完成；下一步 F3 历史/审计或性能收敛 |
-| Workflow UX | `src/views/*`（chat-view、面板、modal）、i18n | 1 agent | F1/F2 已接入；下一步 F4 批量队列；ChatView 串行 |
+| Runtime | `src/views/run-controller.ts`、`src/dsh/batch-runner.ts`、`src/dsh/dsh-client.ts`、`src/dsh/dsh-runner.ts`、对应测试 | 1 agent | R1/R2/R4 已完成；F3/F4 待手测；下一步性能收敛 |
+| Workflow UX | `src/views/*`（chat-view、面板、modal）、i18n | 1 agent | F1/F2/F3/F4 已接入；待真实 vault 手测；ChatView 串行 |
 | Release/Docs | `docs/*`、README、workflows | 可与上面并行 | 不碰 src；发布前统一验证 |
 | Research | 无生产代码 | 1 agent | R3 已决策；剩 L1 会话连续性 spike |
 
@@ -168,6 +170,7 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 2. **变更审阅**：采用“运行后快照 diff + 显式撤销”；预写确认暂不做（headless 无 answerer）。
 3. **并行方式**：Runtime 先做 R1/R2；Workflow UX 后动 ChatView；Research 只做 spike。
 4. **F1/F2 验收**：2026-11-26 用户真实 vault 手测通过（选区 Replace/Insert/取消、逐文件/全部撤销）。
+5. **F3/F4 范围**：F3 先补审计与历史详情；F4 先做多选笔记、批量结束一次审阅；0.1.9 不发布。
 
 仍待用户决定：
 

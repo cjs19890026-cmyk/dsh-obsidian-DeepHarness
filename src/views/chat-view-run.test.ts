@@ -100,6 +100,7 @@ function buildView(
   appSlot.current = app;
   const plugin = makePluginDouble(app);
   (plugin.history as unknown as Record<string, unknown>).addTurn = vi.fn(async () => {});
+  (plugin.history as unknown as Record<string, unknown>).updateTurn = vi.fn(async () => {});
   const view = new ChatView({} as never, plugin as never, {
     client: client as ChatViewDeps['client'],
     runner: runner as ChatViewDeps['runner'],
@@ -141,6 +142,8 @@ describe('ChatView run chain', () => {
     const client = makeClient(async (task, opts) => {
       seenTask = task;
       opts.onStdoutLine?.('DLEVENT\t{"t":"think","text":"planning"}');
+      opts.onStdoutLine?.('DLEVENT\t{"t":"tool","status":"start","id":"t1","name":"Read","args":"note.md"}');
+      opts.onStdoutLine?.('DLEVENT\t{"t":"tool","status":"result","id":"t1","ok":true,"summary":"read 6 bytes"}');
       streamed = 'streamed';
       return result({ stdout: 'FINAL_ANSWER' });
     });
@@ -156,7 +159,11 @@ describe('ChatView run chain', () => {
     // The answer is persisted even though jsdom's MarkdownRenderer stub does
     // not materialise text into the DOM.
     expect((plugin.history as unknown as { addTurn: ReturnType<typeof vi.fn> }).addTurn).toHaveBeenCalledWith(
-      expect.objectContaining({ answer: 'FINAL_ANSWER' }),
+      expect.objectContaining({
+        answer: 'FINAL_ANSWER',
+        status: 'succeeded',
+        tools: [{ name: 'Read', args: 'note.md', ok: true, summary: 'read 6 bytes' }],
+      }),
       expect.anything(),
     );
   });
@@ -201,7 +208,7 @@ describe('ChatView run chain', () => {
 
   it('handles a non-zero exit and keeps the error visible', async () => {
     const client = makeClient(async () => result({ exitCode: 1, stderr: 'spawn failed hard' }));
-    const { view } = buildView(client);
+    const { view, plugin } = buildView(client);
     await view.onOpen();
 
     await typeAndSend(view);
@@ -209,11 +216,19 @@ describe('ChatView run chain', () => {
     expect(runState(view)).toBe('idle');
     expect(sendButton(view).classList.contains('is-stop')).toBe(false);
     expect(view.containerEl.textContent).toContain('spawn failed hard');
+    expect((plugin.history as unknown as { addTurn: ReturnType<typeof vi.fn> }).addTurn).toHaveBeenCalledWith(
+      expect.objectContaining({
+        status: 'failed',
+        exitCode: 1,
+        error: 'spawn failed hard',
+      }),
+      expect.anything(),
+    );
   });
 
   it('restores the composer when preparation fails (the stuck-Stop regression)', async () => {
     const client = makeClient(async () => result());
-    const { view } = buildView(client, makeRunner({ detectBin: async () => null }));
+    const { view, plugin } = buildView(client, makeRunner({ detectBin: async () => null }));
     await view.onOpen();
 
     await typeAndSend(view);
@@ -222,6 +237,10 @@ describe('ChatView run chain', () => {
     expect(runState(view)).toBe('idle');
     expect(sendButton(view).classList.contains('is-stop')).toBe(false);
     expect(view.containerEl.textContent).toContain('dsh');
+    expect((plugin.history as unknown as { addTurn: ReturnType<typeof vi.fn> }).addTurn).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'failed', error: expect.stringContaining('Preparation failed') }),
+      expect.anything(),
+    );
   });
 
   it('opens a change review after the run reports changed markdown', async () => {
@@ -239,7 +258,7 @@ describe('ChatView run chain', () => {
       files['note.md'] = 'after';
       return result();
     });
-    const { view } = buildView(client, makeRunner(), app);
+    const { view, plugin } = buildView(client, makeRunner(), app);
     await view.onOpen();
 
     await typeAndSend(view);
@@ -249,6 +268,10 @@ describe('ChatView run chain', () => {
     expect(document.body.textContent).toContain('- before');
     expect(document.body.textContent).toContain('+ after');
     expect(runState(view)).toBe('idle');
+    expect((plugin.history as unknown as { updateTurn: ReturnType<typeof vi.fn> }).updateTurn).toHaveBeenCalledWith(
+      expect.any(Number),
+      { changedFiles: ['note.md'] },
+    );
   });
 
   it('does not start a second run while one is active', async () => {

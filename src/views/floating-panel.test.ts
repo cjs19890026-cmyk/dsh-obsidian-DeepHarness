@@ -12,6 +12,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('obsidian', () => ({
   // The panels only use setIcon for decoration; jsdom needs no SVG.
   setIcon: vi.fn(),
+  Notice: class { constructor(_message: string) {} },
 }));
 
 import { FloatingPanel } from './floating-panel';
@@ -175,6 +176,61 @@ describe('panel contents', () => {
     (document.querySelector('.dsh-history-panel-item') as HTMLElement).click();
     expect(view.resumeSession).toHaveBeenCalledWith(expect.objectContaining({ id: 's1' }));
     expect(history.isOpen).toBe(false);
+  });
+
+  it('expands a session into per-turn audit details and copies a summary', () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText },
+      configurable: true,
+    });
+    const session = {
+      id: 's-audit',
+      title: 'Audit session',
+      endedAt: Date.now(),
+      pinned: false,
+      note: '',
+      turns: [
+        {
+          ts: 1,
+          user: 'fix note',
+          answer: 'done',
+          durationMs: 1200,
+          status: 'succeeded',
+          tools: [{ name: 'Read', args: 'note.md', ok: true }],
+          changedFiles: ['note.md'],
+        },
+      ],
+    };
+    const history = new HistoryPanel(makeView([session]), makeAnchor('h'));
+    history.open();
+
+    (document.querySelector('.dsh-history-details-toggle') as HTMLElement).click();
+    const details = document.querySelector('.dsh-history-details') as HTMLElement;
+    expect(details.classList.contains('hidden')).toBe(false);
+    expect(details.textContent).toContain('Succeeded');
+    expect(details.textContent).toContain('Read');
+    expect(details.textContent).toContain('note.md');
+
+    (document.querySelector('.dsh-history-copy') as HTMLElement).click();
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('# Audit session'));
+    expect(writeText).toHaveBeenCalledWith(expect.stringContaining('Changed: note.md'));
+  });
+
+  it('filters sessions by title without rebuilding the panel', () => {
+    const sessions = [
+      { id: 's1', title: 'Alpha', endedAt: Date.now(), pinned: false, note: '', turns: [] },
+      { id: 's2', title: 'Beta', endedAt: Date.now(), pinned: false, note: '', turns: [] },
+    ];
+    const history = new HistoryPanel(makeView(sessions), makeAnchor('h'));
+    history.open();
+    const filter = document.querySelector('.dsh-history-filter') as HTMLInputElement;
+    filter.value = 'beta';
+    filter.dispatchEvent(new Event('input'));
+
+    const items = document.querySelectorAll('.dsh-history-panel-item');
+    expect(items[0].classList.contains('hidden')).toBe(true);
+    expect(items[1].classList.contains('hidden')).toBe(false);
   });
 
   it('inserts "/name " and closes when a skill is clicked', () => {

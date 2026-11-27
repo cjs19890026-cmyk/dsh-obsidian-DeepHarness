@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ItemView, WorkspaceLeaf, MarkdownRenderer, Notice, setIcon, Menu, MarkdownView, Keymap } from 'obsidian';
 import type DshPlugin from '../main';
-import { DshClient, type DshRunResult } from '../dsh/dsh-client';
+import { DshClient } from '../dsh/dsh-client';
 import { DshRunner, type PreparationIssue } from '../dsh/dsh-runner';
 import { buildTitleEntries, linkifyNoteTitles, type NoteInfo, type NoteTitleEntry } from '../core/linkify';
 import { scanSkillRoots, type SkillEntry, type ScanRoot } from '../core/skills';
@@ -11,7 +11,7 @@ import { REASONING_OPTIONS, PERMISSION_OPTIONS, permissionLabel, type Permission
 import { modelDisplayLabel, modelOptionsWithCurrent } from '../settings/validate';
 import { ContextMeter, estimateTokens } from '../core/context-meter';
 import { parseHeadlessOutput, parseDshEventLine, errorHint, contextWindowFor, resolveVaultRelativeDir, frontmatterAliases, partialTurnAnswer, stripCodeFence } from '../dsh/pure';
-import { HistoryTool } from '../core/history';
+import { HistoryTool, type HistoryRunStatus } from '../core/history';
 import { MentionSuggest } from './mention';
 import { ChipEditor } from './chip-editor';
 import { HistoryPanel } from './history-panel';
@@ -113,6 +113,26 @@ export interface SelectionRequest {
   instruction?: string;
   original: string;
   apply: (replacement: string, mode: SelectionApplyMode) => boolean;
+}
+
+/**
+ * Everything the history store needs to audit one terminal run. Collected as
+ * the run proceeds, then written once in `recordTurn()` so success, failure,
+ * cancellation and timeout all leave the same shape of record.
+ */
+interface RunAudit {
+  message: string;
+  startedAt: number;
+  thinking: string;
+  tools: HistoryTool[];
+  answer: string;
+  status: HistoryRunStatus;
+  durationMs: number;
+  error?: string;
+  exitCode?: number;
+  killReason?: 'user' | 'timeout';
+  /** Partial stdout kept for an interrupted run. */
+  stdout?: string;
 }
 
 export class ChatView extends ItemView {
@@ -433,6 +453,12 @@ export class ChatView extends ItemView {
     this.updateTriggerLabels();
   }
 
+  /** True while this view owns a run; used to keep batches and chats from
+   *  writing the same vault at once. */
+  isBusy(): boolean {
+    return this.run.isActive();
+  }
+
   onClose(): Promise<void> {
     this.teardown();
     this.plugin.unregisterChatView(this);
@@ -594,6 +620,10 @@ export class ChatView extends ItemView {
   }
 
   private async sendMessage(): Promise<void> {
+    if (this.plugin.isBatchRunning?.()) {
+      new Notice(t('batch.busy'));
+      return;
+    }
     const message = this.editor.getText().trim();
     if (!message || !this.run.canStart()) {
       if (this.run.isActive()) new Notice(t('chat.busy'));
@@ -631,15 +661,39 @@ export class ChatView extends ItemView {
     message: string,
     handle: RunHandle,
   ): Promise<void> {
+    const audit: RunAudit = {
+      message,
+      startedAt: Date.now(),
+      thinking: '',
+      tools: [],
+      answer: '',
+      status: 'failed',
+      durationMs: 0,
+    };
     const prep = await this.prepareRun(message);
     if (!prep.ok) {
       this.run.fail(handle);
       this.clearSelectionRequest();
+      if (!this.closed) {
+        audit.error = t('chat.prepareFailed');
+        audit.durationMs = Date.now() - audit.startedAt;
+        this.recordTurn(audit);
+      }
       return;
     }
     // A Stop while preparation was in flight cancels the handle; the late
     // preparation result must not spawn a child or touch the transcript.
-    if (!this.run.isCurrent(handle) || !this.run.markRunning(handle)) return;
+    if (!this.run.isCurrent(handle) || !this.run.markRunning(handle)) {
+      // Stop landed while preparation was in flight. Nothing spawned, but the
+      // user still gets a terminal, auditable turn instead of a silent no-op.
+      if (!this.closed) {
+        audit.status = 'cancelled';
+        audit.durationMs = Date.now() - audit.startedAt;
+        audit.answer = t('chat.cancelled');
+        this.recordTurn(audit);
+      }
+      return;
+    }
     const { bin, nodeBin, dshScript, task, dshHome, workdir, patchPaths } = prep;
     // P1-3: preparation degraded (DSH_HOME fallback, patch / skill / memory
     // write failures, workdir fallback…) — surface it once instead of running
@@ -651,7 +705,15 @@ export class ChatView extends ItemView {
     const reviewBefore = this.selectionRequest ? null : await this.captureVaultSnapshot();
     // Stop can land while the snapshot is being read; `isCurrent` alone would
     // still be true for the terminal state, so require an active run.
-    if (!this.run.isCurrent(handle) || !this.run.isActive()) return;
+    if (!this.run.isCurrent(handle) || !this.run.isActive()) {
+      if (!this.closed) {
+        audit.status = 'cancelled';
+        audit.durationMs = Date.now() - audit.startedAt;
+        audit.answer = t('chat.cancelled');
+        this.recordTurn(audit);
+      }
+      return;
+    }
 
     // Streaming assistant message: thinking + tools stream inline into the
     // message (web-UI style, no wrapper container), then the answer renders
@@ -689,6 +751,10 @@ export class ChatView extends ItemView {
       name: string;
       args: string;
     }>();
+    // Metadata is collected independently of the show-tools toggle: hiding the
+    // live rows must not hide the run from the audit trail.
+    const toolMeta = new Map<string, { name: string; args: string }>();
+    const recordedToolIds = new Set<string>();
     const toolsHistory: HistoryTool[] = [];
     let thinkingText = '';
     const handleStreamLine = (line: string): void => {
@@ -706,8 +772,12 @@ export class ChatView extends ItemView {
         return;
       }
       // evt.t === 'tool'
-      if (!toolsWrap) return; // tool display disabled
       if (evt.status === 'start') {
+        toolMeta.set(evt.id, { name: evt.name, args: evt.argsFull ?? evt.args });
+        if (!toolsWrap) {
+          this.scrollToBottom();
+          return;
+        }
         // One tool call block: clickable header + expanded content
         const call = toolsWrap.createDiv({ cls: 'dsh-tool-call' });
         const header = call.createEl('button', { cls: 'dsh-tool-header' });
@@ -731,7 +801,17 @@ export class ChatView extends ItemView {
         };
         toolRows.set(evt.id, { status, chevron, content, name: evt.name, args: evt.argsFull ?? evt.args });
       } else {
+        const meta = evt.id ? toolMeta.get(evt.id) : undefined;
         const entry = evt.id ? toolRows.get(evt.id) : undefined;
+        if (meta && (!evt.id || !recordedToolIds.has(evt.id))) {
+          if (evt.id) recordedToolIds.add(evt.id);
+          toolsHistory.push({
+            name: meta.name,
+            args: meta.args,
+            ok: evt.ok,
+            summary: evt.summary || undefined,
+          });
+        }
         if (entry) {
           entry.status.classList.remove('status-running');
           if (evt.ok) {
@@ -746,13 +826,6 @@ export class ChatView extends ItemView {
             : evt.ok ? t('chat.toolNoOutput') : t('chat.toolFailed');
           // Tools stay collapsed by default; result visible when expanded.
           entry.content.createDiv({ cls: 'dsh-tool-line', text: lineText });
-          // Collect for history
-          toolsHistory.push({
-            name: entry.name,
-            args: entry.args,
-            ok: evt.ok,
-            summary: evt.summary || undefined,
-          });
         }
       }
       this.scrollToBottom();
@@ -761,6 +834,9 @@ export class ChatView extends ItemView {
     // Status line
     const statusEl = this.createStatusElement();
     this.startStatusTimer(statusEl);
+
+    audit.tools = toolsHistory;
+    let turnTs: number | null = null;
 
     try {
       const result = await this.client.run(task, {
@@ -781,6 +857,13 @@ export class ChatView extends ItemView {
 
       this.stopStatusTimer();
 
+      audit.thinking = thinkingText;
+      audit.tools = toolsHistory;
+      audit.stdout = result.stdout;
+      audit.durationMs = result.durationMs;
+      audit.exitCode = result.exitCode ?? undefined;
+      if (result.killReason) audit.killReason = result.killReason;
+
       if (this.closed) {
         // P2-K: the view (or the plugin) went away while the task ran. The DOM
         // is gone — never write to it. What the run produced before the kill
@@ -788,13 +871,16 @@ export class ChatView extends ItemView {
         // being silently dropped.
         this.run.fail(handle);
         this.clearSelectionRequest();
-        this.savePartialTurn(message, thinkingText, toolsHistory, result);
+        audit.status = 'interrupted';
+        this.savePartialTurn(audit);
       } else if (result.killReason === 'user') {
         // Stopped by the user: keep it subtle — a small status note only.
         this.run.cancel(handle);
         this.clearSelectionRequest();
         statusEl.setText(`⏹ ${t('chat.cancelled')}`);
         this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
+        audit.status = 'cancelled';
+        audit.answer = partialTurnAnswer(result.stdout, thinkingText, toolsHistory.length > 0, t('chat.cancelled')) ?? '';
       } else if (result.killReason === 'timeout') {
         // Auto-stopped after the configured timeout: surface it as an error
         // with its own message, so it is never mistaken for a manual stop.
@@ -805,6 +891,9 @@ export class ChatView extends ItemView {
         statusEl.addClass('dsh-status-error');
         contentEl.createSpan({ text: `> ❌ ${msg}`, cls: 'dsh-error-inline' });
         this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
+        audit.status = 'timedOut';
+        audit.error = msg;
+        audit.answer = partialTurnAnswer(result.stdout, thinkingText, toolsHistory.length > 0, msg) ?? '';
       } else if (result.exitCode !== 0 || !result.stdout.trim()) {
         this.run.fail(handle);
         this.clearSelectionRequest();
@@ -813,6 +902,9 @@ export class ChatView extends ItemView {
         statusEl.addClass('dsh-status-error');
         contentEl.createSpan({ text: `> ❌ ${t('chat.failed', { message: errMsg })}`, cls: 'dsh-error-inline' });
         this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
+        audit.status = 'failed';
+        audit.error = errMsg;
+        audit.answer = partialTurnAnswer(result.stdout, thinkingText, toolsHistory.length > 0, errMsg) ?? '';
       } else {
         this.run.succeed(handle);
         // The stream relay consumed DLEVENT lines live; the remaining stdout
@@ -827,33 +919,36 @@ export class ChatView extends ItemView {
         // see MEMORY_CONTEXT for why this is the whole context window).
         this.memory.push(makeMemoryTurn(message, answer));
         if (this.memory.length > MEMORY_CONTEXT.retainTurns) this.memory.shift();
-        // Persist this turn into the current session
-        void this.plugin.history?.addTurn({
-          ts: Date.now(),
-          user: message,
-          answer,
-          thinking: thinkingText || undefined,
-          tools: toolsHistory.length > 0 ? toolsHistory : undefined,
-          durationMs: result.durationMs,
-        }, {
-          model: this.plugin.settings.model,
-          effort: this.plugin.settings.reasoningEffort,
-          permission: this.plugin.settings.permissionMode,
-        });
+        audit.status = 'succeeded';
+        audit.answer = answer;
       }
+
+      if (audit.status !== 'interrupted') turnTs = this.recordTurn(audit);
     } catch (e) {
       this.stopStatusTimer();
       this.run.fail(handle);
       this.clearSelectionRequest();
-      if (this.closed) return; // torn down mid-run: nothing to render
       const msg = e instanceof Error ? e.message : String(e);
-      statusEl.setText(`✗ ${t('chat.failed', { message: msg })}`);
-      statusEl.addClass('dsh-status-error');
-      contentEl.createSpan({ text: `> ❌ ${t('chat.failed', { message: msg })}`, cls: 'dsh-error-inline' });
-      this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
+      audit.status = 'failed';
+      audit.error = msg;
+      audit.durationMs = Date.now() - audit.startedAt;
+      audit.thinking = thinkingText;
+      audit.tools = toolsHistory;
+      if (this.closed) {
+        audit.status = 'interrupted';
+        this.savePartialTurn(audit);
+      } else {
+        statusEl.setText(`✗ ${t('chat.failed', { message: msg })}`);
+        statusEl.addClass('dsh-status-error');
+        contentEl.createSpan({ text: `> ❌ ${t('chat.failed', { message: msg })}`, cls: 'dsh-error-inline' });
+        this.finalizeStreamMessage(respEl, contentEl, thinkBlock, thinkBody, thinkingText, null);
+        turnTs = this.recordTurn(audit);
+      }
     }
 
-    if (!this.closed && reviewBefore) void this.reviewChanges(reviewBefore);
+    // The turn is persisted above without a file list; the diff fills it in
+    // afterwards. This keeps a slow vault snapshot off the composer path.
+    if (!this.closed && reviewBefore && turnTs !== null) void this.reviewChanges(reviewBefore, turnTs);
   }
 
   /** Best-effort pre-run snapshot; a failure must never block the task. */
@@ -866,14 +961,45 @@ export class ChatView extends ItemView {
   }
 
   /**
+   * Persist one terminal run. The turn is written before the after-run vault
+   * diff so the composer returns to Send immediately; `reviewChanges` fills in
+   * `changedFiles` once the snapshot finishes.
+   */
+  private recordTurn(audit: RunAudit): number {
+    const ts = Date.now();
+    void this.plugin.history?.addTurn?.({
+      ts,
+      user: audit.message,
+      answer: audit.answer,
+      thinking: audit.thinking.trim() || undefined,
+      tools: audit.tools.length > 0 ? audit.tools : undefined,
+      durationMs: audit.durationMs,
+      status: audit.status,
+      ...(audit.error ? { error: audit.error } : {}),
+      ...(audit.exitCode !== undefined ? { exitCode: audit.exitCode } : {}),
+      ...(audit.killReason ? { killReason: audit.killReason } : {}),
+    }, {
+      model: this.plugin.settings.model,
+      effort: this.plugin.settings.reasoningEffort,
+      permission: this.plugin.settings.permissionMode,
+    });
+    return ts;
+  }
+
+  /**
    * Compare the vault with the pre-run snapshot and offer an explicit undo.
    * Runs after the turn settles, so opening the modal never delays the answer
    * or the composer returning to Send.
    */
-  private async reviewChanges(before: ChangeSnapshot): Promise<void> {
+  private async reviewChanges(before: ChangeSnapshot, turnTs: number): Promise<void> {
     try {
       const after = await snapshotVault(this.app);
       const changes = diffSnapshots(before, after);
+      if (changes.length > 0) {
+        void this.plugin.history?.updateTurn?.(turnTs, {
+          changedFiles: changes.map((change) => change.path),
+        });
+      }
       if (changes.length === 0 || this.closed) return;
       new ChangeReviewModal(
         this.app,
@@ -893,31 +1019,17 @@ export class ChatView extends ItemView {
    * activity produced before the kill is not silently lost. Nothing is
    * recorded when the run produced no content worth keeping.
    */
-  private savePartialTurn(
-    message: string,
-    thinkingText: string,
-    tools: HistoryTool[],
-    result: DshRunResult,
-  ): void {
+  private savePartialTurn(audit: RunAudit): number | null {
     const answer = partialTurnAnswer(
-      result.stdout,
-      thinkingText,
-      tools.length > 0,
+      audit.stdout ?? '',
+      audit.thinking,
+      audit.tools.length > 0,
       t('chat.runInterrupted'),
     );
-    if (answer === null) return; // nothing worth keeping
-    void this.plugin.history?.addTurn({
-      ts: Date.now(),
-      user: message,
-      answer,
-      thinking: thinkingText.trim() || undefined,
-      tools: tools.length > 0 ? tools : undefined,
-      durationMs: result.durationMs,
-    }, {
-      model: this.plugin.settings.model,
-      effort: this.plugin.settings.reasoningEffort,
-      permission: this.plugin.settings.permissionMode,
-    });
+    if (answer === null) return null; // nothing worth keeping
+    audit.answer = answer;
+    audit.status = 'interrupted';
+    return this.recordTurn(audit);
   }
 
   /**
@@ -1255,6 +1367,10 @@ export class ChatView extends ItemView {
    * is opened only after this run succeeds.
    */
   beginSelectionAction(request: SelectionRequest): void {
+    if (this.plugin.isBatchRunning?.()) {
+      new Notice(t('batch.busy'));
+      return;
+    }
     if (!this.editor) {
       new Notice(t('chat.noChatView'));
       return;

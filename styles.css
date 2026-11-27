@@ -1629,3 +1629,281 @@
   text-overflow: ellipsis;
   text-align: right;
 }
+
+/* ── History audit details (F3) ─────────────────────────── */
+.dsh-history-controls {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  padding: 2px 2px 6px;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--background-primary);
+}
+
+.dsh-history-filter {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  padding: 3px 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+}
+
+.dsh-history-filter:focus {
+  outline: none;
+  border-color: var(--interactive-accent);
+}
+
+.dsh-history-range {
+  flex-shrink: 0;
+  font-size: 10px;
+  padding: 3px 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  color: var(--text-muted);
+}
+
+.dsh-history-details-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 2px;
+  flex-shrink: 0;
+  opacity: 0.45;
+  transition: opacity 0.12s ease, color 0.12s ease;
+}
+
+.dsh-history-panel-item:hover .dsh-history-details-toggle,
+.dsh-history-details-toggle:focus-visible {
+  opacity: 1;
+}
+
+.dsh-history-details-toggle:hover {
+  color: var(--text-normal);
+}
+
+.dsh-history-details-toggle svg {
+  width: 13px;
+  height: 13px;
+}
+
+.dsh-history-details {
+  margin: 4px 0 2px 20px;
+  padding: 6px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-secondary);
+  cursor: default;
+}
+
+.dsh-history-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  font-size: 10px;
+  color: var(--text-muted);
+  padding-bottom: 4px;
+}
+
+.dsh-history-turn {
+  border-top: 1px solid var(--background-modifier-border);
+  padding: 5px 0 2px;
+}
+
+.dsh-history-turn-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dsh-history-status {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--background-modifier-border);
+  color: var(--text-muted);
+}
+
+.dsh-history-status.is-succeeded { color: var(--text-success); }
+.dsh-history-status.is-failed { color: var(--text-error); }
+.dsh-history-status.is-cancelled,
+.dsh-history-status.is-timedOut,
+.dsh-history-status.is-interrupted { color: var(--text-warning); }
+
+.dsh-history-turn-user {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--text-normal);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dsh-history-turn-meta {
+  flex-shrink: 0;
+  font-size: 9px;
+  color: var(--text-faint);
+}
+
+.dsh-history-turn-line {
+  font-size: 10px;
+  color: var(--text-muted);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.dsh-history-turn-error {
+  font-size: 10px;
+  color: var(--text-error);
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.dsh-history-turn-empty {
+  font-size: 10px;
+  color: var(--text-faint);
+}
+
+.dsh-history-copy {
+  margin-top: 6px;
+  font-size: 10px;
+  padding: 2px 7px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.dsh-history-copy:hover {
+  color: var(--text-normal);
+  border-color: var(--interactive-accent);
+}
+
+/* ---- Batch processing ------------------------------------------------ */
+
+.dsh-batch-modal {
+  min-width: min(560px, 80vw);
+}
+
+.dsh-batch-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.dsh-batch-search {
+  flex: 1;
+  min-width: 0;
+}
+
+.dsh-batch-link {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: none;
+  border: none;
+  box-shadow: none;
+  padding: 2px 4px;
+  cursor: pointer;
+}
+
+.dsh-batch-link:hover {
+  color: var(--text-accent);
+}
+
+.dsh-batch-list {
+  max-height: 42vh;
+  overflow-y: auto;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  padding: 4px;
+  margin-bottom: 10px;
+}
+
+.dsh-batch-note,
+.dsh-batch-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  padding: 3px 5px;
+  border-radius: var(--radius-s);
+}
+
+.dsh-batch-note {
+  cursor: pointer;
+}
+
+.dsh-batch-note:hover,
+.dsh-batch-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.dsh-batch-note input {
+  margin: 0;
+}
+
+.dsh-batch-instruction {
+  width: 100%;
+  min-height: 72px;
+  resize: vertical;
+  margin-bottom: 10px;
+}
+
+.dsh-batch-row.is-running { color: var(--text-accent); }
+.dsh-batch-row.is-succeeded .dsh-batch-icon { color: var(--text-success); }
+.dsh-batch-row.is-failed .dsh-batch-icon { color: var(--text-error); }
+.dsh-batch-row.is-cancelled .dsh-batch-icon { color: var(--text-warning); }
+
+.dsh-batch-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-faint);
+}
+
+.dsh-batch-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dsh-batch-status {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--text-faint);
+  text-transform: lowercase;
+}
+
+.dsh-batch-error {
+  flex-basis: 100%;
+  padding-left: 22px;
+  font-size: 10px;
+  color: var(--text-error);
+  overflow-wrap: anywhere;
+}
+
+.dsh-batch-empty {
+  padding: 8px;
+  font-size: 11px;
+  color: var(--text-faint);
+}

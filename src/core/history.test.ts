@@ -123,8 +123,15 @@ describe('HistoryStore', () => {
     const turn = makeTurn('First question', 123456);
     await store.addTurn(turn, { model: 'model-x', effort: 'max', permission: 'workspace-write' });
 
+    const stored = {
+      ...turn,
+      status: 'succeeded' as const,
+      model: 'model-x',
+      effort: 'max',
+      permission: 'workspace-write',
+    };
     const current = store.getCurrentSession();
-    expect(current.turns).toEqual([turn]);
+    expect(current.turns).toEqual([stored]);
     expect(current.title).toBe('First question');
     expect(current.startedAt).toBe(123456);
     expect(current.endedAt).toBe(123456);
@@ -134,13 +141,39 @@ describe('HistoryStore', () => {
 
     const persisted = JSON.parse(fs.readFileSync(absPath, 'utf8')) as { current?: SessionRecord };
     const persistedCurrent = persisted.current!;
-    expect(persistedCurrent.turns).toEqual([turn]);
+    expect(persistedCurrent.turns).toEqual([stored]);
     expect(persistedCurrent).toMatchObject({
       id: current.id,
       title: 'First question',
       model: 'model-x',
       effort: 'max',
       permission: 'workspace-write',
+    });
+  });
+
+  it('updateTurn patches an existing turn and persists it', async () => {
+    const store = makeHistory(10);
+    await store.load();
+    const turn = makeTurn('Audit me', 555);
+    await store.addTurn(turn, makeMeta());
+    const ts = store.getCurrentSession().turns[0].ts;
+
+    await store.updateTurn(ts, {
+      status: 'failed',
+      changedFiles: ['a.md', 'b.md'],
+      killReason: 'timeout',
+    });
+
+    expect(store.getCurrentSession().turns[0]).toMatchObject({
+      ts,
+      status: 'failed',
+      changedFiles: ['a.md', 'b.md'],
+      killReason: 'timeout',
+    });
+    const persisted = JSON.parse(fs.readFileSync(absPath, 'utf8')) as { current?: SessionRecord };
+    expect(persisted.current?.turns[0]).toMatchObject({
+      status: 'failed',
+      changedFiles: ['a.md', 'b.md'],
     });
   });
 
@@ -239,5 +272,19 @@ describe('HistoryStore follows its path when it moves', () => {
     // back and forth.
     const left = JSON.parse(fs.readFileSync(oldPath, 'utf8')) as { sessions: SessionRecord[] };
     expect(left.sessions.map((s) => s.turns[0]?.user)).not.toContain('after the move');
+  });
+});
+
+describe('HistoryStore.beginSession', () => {
+  it('archives the current conversation and starts a titled empty session', async () => {
+    const store = makeHistory(20);
+    await store.load();
+    await store.addTurn(makeTurn('chat turn', 1), makeMeta());
+
+    await store.beginSession('Batch: 2 notes');
+
+    expect(store.getCurrentSession().title).toBe('Batch: 2 notes');
+    expect(store.getCurrentSession().turns).toHaveLength(0);
+    expect(store.getSessions().some((session) => session.turns[0]?.user === 'chat turn')).toBe(true);
   });
 });

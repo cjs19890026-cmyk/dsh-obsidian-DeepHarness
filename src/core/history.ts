@@ -18,6 +18,13 @@ export interface HistoryTool {
   summary?: string;
 }
 
+export type HistoryRunStatus =
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'timedOut'
+  | 'interrupted';
+
 export interface HistoryTurn {
   ts: number;
   user: string;
@@ -25,6 +32,18 @@ export interface HistoryTurn {
   thinking?: string;
   tools?: HistoryTool[];
   durationMs: number;
+  /** Terminal state of the run. Older records omit this and are treated as succeeded. */
+  status?: HistoryRunStatus;
+  /** Per-turn values; sessions also keep the first turn's values for compatibility. */
+  model?: string;
+  effort?: string;
+  permission?: string;
+  /** Vault-relative Markdown paths changed by this run, filled after the review snapshot. */
+  changedFiles?: string[];
+  exitCode?: number;
+  killReason?: 'user' | 'timeout';
+  /** User-facing failure reason, when the run did not succeed. */
+  error?: string;
 }
 
 export interface SessionRecord {
@@ -129,8 +148,47 @@ export class HistoryStore {
       this.current.effort = meta.effort;
       this.current.permission = meta.permission;
     }
-    this.current.turns.push(turn);
-    this.current.endedAt = turn.ts;
+    // New turns always carry a terminal status and their own run metadata.
+    // Older history files predate these fields; the UI treats a missing status
+    // as succeeded, so no destructive migration is needed.
+    const stored: HistoryTurn = {
+      status: 'succeeded',
+      model: meta.model,
+      effort: meta.effort,
+      permission: meta.permission,
+      ...turn,
+    };
+    this.current.turns.push(stored);
+    this.current.endedAt = stored.ts;
+    this.save();
+  }
+
+  /**
+   * Patch a turn already in the current session. Used for the post-run vault
+   * diff: the turn is persisted immediately when the run ends, then its
+   * changed-file list is filled once the after-run snapshot completes, so a
+   * slow snapshot never delays the composer returning to Send.
+   */
+  async updateTurn(ts: number, patch: Partial<Omit<HistoryTurn, 'ts'>>): Promise<void> {
+    const turn = this.current.turns.find((t) => t.ts === ts);
+    if (!turn) return;
+    Object.assign(turn, patch);
+    this.save();
+  }
+
+  /**
+   * Archive the current session (if it has turns) and start a titled one.
+   * Used by batch runs: each batch gets one session instead of being appended
+   * to whatever chat conversation happened to be open.
+   */
+  async beginSession(title: string): Promise<void> {
+    if (this.current.turns.length > 0) {
+      this.sessions.push(this.current);
+      this.trim();
+    }
+    this.current = this.newSession();
+    this.current.title = title;
+    this.current.startedAt = Date.now();
     this.save();
   }
 

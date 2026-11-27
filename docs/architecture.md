@@ -1,6 +1,6 @@
 # 架构 — DeepHarness
 
-> 状态：living document，最后核对 **2026-11-26**（0.1.8 / R1/R2/F1/F2 手测后合入 main；此后 HEAD 以 git log 为准）。
+> 状态：living document，最后核对 **2026-11-27**（0.1.8 / R1–R4 + F1–F4 代码完成；F3/F4 待在真实 vault 手测；此后 HEAD 以 git log 为准）。
 > 代码是最终事实源；本文解释**为什么这样分层、哪些不能碰、债在哪里**。
 > 任务与优先级见 [`roadmap.md`](roadmap.md)，命令与流程见 [`development.md`](development.md)。
 
@@ -53,6 +53,10 @@ DSH child process
 | `src/views/selection-modals.ts` | 选区动作选择与结果预览；只有用户点按钮才 apply | 不直接改笔记（apply 回调由 `main.ts` 提供） |
 | `src/views/change-review-modal.ts` | 运行后变更列表、逐文件 diff、显式撤销 | 不自动回滚 |
 | `src/core/change-tracker.ts` | 运行前后 Markdown 快照、diff、撤销；大小/数量上限 | 不读二进制、不碰 UI |
+| `src/core/batch-controller.ts` | 批量顺序队列：逐项状态、失败继续、取消；不 spawn | 不做 UI、不直接写历史 |
+| `src/dsh/batch-runner.ts` | 批量环境准备 + 每项 headless 执行器；复用 DshRunner/DshClient | 不渲染、不打开 modal |
+| `src/views/batch-modal.ts` | 多选笔记、指令、逐项进度、取消 | 不执行 DSH、不写笔记 |
+| `src/views/history-panel.ts` | 历史列表、筛选、详情、复制摘要 | 不改变历史数据 |
 | `src/dsh/dsh-runner.ts` | 任务前准备：detect bin/node、DSH_HOME 迁移与写入、workdir、persona、stream relay、obsidian skill、memory seed、skill-dirs patch、task 组装 | 不 spawn、不碰 Obsidian UI |
 | `src/dsh/dsh-client.ts` | 唯一 spawn 点：参数/env、stdio 行解析入口、超时、abort、SIGTERM→SIGKILL、进程注册表 | 不做 UI、不读设置页 |
 | `src/dsh/pure.ts` | 无 Obsidian 依赖的纯函数：DLEVENT 解析、npm shim 解析、headless 输出清洗、错误码映射 | 不读写文件 |
@@ -66,7 +70,7 @@ DSH child process
 | `src/i18n/index.ts` | en/zh 文案与 `t()` | 不放业务状态 |
 | `src/views/*` | 面板、弹窗、mention、chip editor 等 UI 组件 | 不拥有运行生命周期 |
 
-依赖方向：`views → dsh/core/settings/i18n`，`dsh → core/i18n`，`core → i18n`。已知反向依赖：`dsh-runner.ts` 从 `settings/index.ts` 取类型，`chat-view.ts` 从 `settings/index.ts` 取 option 常量；理想是 `settings/types.ts` + `settings/validate.ts`，见 §10。
+依赖方向：`views → dsh/core/settings/i18n`，`dsh → core/i18n`，`core → i18n`。`R4` 已把 `dsh-runner.ts` / `chat-view.ts` 对 `settings/index` 的依赖改到 `settings/types` + `settings/validate`；剩余耦合是 `DshRunner` 构造时捕获 settings 对象引用（见 §10）。
 
 ## 4. 磁盘布局
 
@@ -113,6 +117,7 @@ DSH child process
 6. **流式**：stdout 逐行 → `parseDshEventLine` → thinking 累积 / tool 行创建与更新；最终 answer = `parseHeadlessOutput(stdout)`（去掉所有 DLEVENT 行）。
 7. **收尾**：按 `closed` / `killReason` / exitCode / stdout 分成功、用户取消、超时、失败、关闭五种路径，分别调用 `run.succeed/cancel/timeout/fail`；成功时写 memory + history；失败/取消/超时也尽量保留可见状态。
 8. **运行后审阅（F2）**：非选区运行重新快照、`diffSnapshots()`，有变更则打开 `ChangeReviewModal`；撤销是显式按钮，不会自动回滚。选区运行改为 `showSelectionPreview()`，用户点 Replace / Insert below 后才写回。
+9. **批量路径（F4）**：`batch-notes` 命令 → `BatchNotesModal` 多选 + 一条指令 → `prepareBatchEnvironment()` 复用同一套 DSH 准备 → 一次 `snapshotVault()` → `HistoryStore.beginSession()` → `BatchController` 顺序执行每项（`BatchExecutorImpl` 每次 `DshClient.run`）→ 逐项 `addTurn`（含 status/error）→ 运行后一次 `diffSnapshots()`/`updateTurn({changedFiles})` → `ChangeReviewModal` → `endSession()`。批量期间 `ChatView.isBusy()`/`isBatchRunning()` 拒绝新的单次运行；批量不做文件夹/搜索结果，先做多选笔记。
 9. **清理**：`sendMessage` 的 `finally` 调 `run.finish(handle)`；无论 prepare 失败、异常、取消、超时还是成功，都回 `idle` 并恢复 Send 按钮。
 10. **视图销毁**：`onClose` / `shutdownForUnload` 置 `closed=true`、`run.dispose()`、持久化当前会话；之后任何异步回调不得再碰 DOM，只能 `savePartialTurn`。
 
@@ -182,8 +187,8 @@ DLEVENT\t{"t":"tool","status":"result","id":"...","ok":true,"summary":"..."}
 
 | # | 债 | 影响 | 处理 |
 |---|---|---|---|
-| 1 | `ChatView` 1489 行，UI + 编排 + 记忆 + 持久化 + 选区/审阅接线 | 改动冲突面大，多 agent 难并行 | 下一步按需抽 MessageListRenderer/Composer；不要大爆炸 |
-| 2 | `DshRunner` 994 行，6 类职责 | 单测 setup 成本高 | 按需拆 service；不在近期大拆 |
+| 1 | `ChatView` 1590 行，UI + 编排 + 记忆 + 持久化 + 选区/审阅/批量门禁接线 | 改动冲突面大，多 agent 难并行 | 下一步按需抽 MessageListRenderer/Composer；不要大爆炸 |
+| 2 | `DshRunner` 988 行，6 类职责 | 单测 setup 成本高 | 按需拆 service；不在近期大拆 |
 | 3 | stream relay 是 `dsh-runner.ts:254` 模板字符串 | 无法 lint/独立测试，改错只能靠生成后比对 | 低风险时抽成 asset + 字节快照测试 |
 | 4 | `dsh-runner.ts:8` / `chat-view.ts:10` 从 `settings/index` 反向取类型/常量 | 分层不纯，循环依赖风险 | 改从 `settings/types` / `validate` 导入 |
 | 5 | 没有原生会话续跑 | “恢复会话”只是重建记忆 + transcript | 先 spike `dsh --profile tui --resume`；不承诺 |

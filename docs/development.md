@@ -23,7 +23,7 @@ npm ci --cache "$(pwd)/.npm-cache"
 
 | 命令 | 作用 |
 |---|---|
-| `npm test` | 全量 Vitest（当前基线 323 passed / 2 skipped，19 文件） |
+| `npm test` | 全量 Vitest（当前基线 339 passed / 2 skipped，22 文件） |
 | `npx tsc --noEmit` | 类型检查 |
 | `npm run build` | 生产构建到 `dist/`（main.js + manifest.json + styles.css） |
 | `npm run dev` | 非压缩构建（**只构建一次，不是 watch**） |
@@ -87,6 +87,7 @@ npx eslint "src/**/*.ts"
 12. **关闭面板 mid-run**：不崩溃；重新打开后历史里有 partial turn（若有内容）。
 13. **选区动作**：选中一段文字 → 命令 `处理选中文本` → 选改写/总结/解释 → 预览出现；点 Cancel 文件不变；点 Replace/Insert below 才写回，且选区已变化时拒绝写入。
 14. **变更审阅**：让 agent 改 2–3 个笔记 → 运行结束出现变更列表；逐文件 Undo 后内容与运行前一致；Undo all 全部恢复；大文件/超限时显示 incomplete 提示。
+15. **批量处理**：`批量处理笔记` → 选 2–3 篇 + 一条指令 → 逐项状态推进；中途取消后不再启动新项；结束后一次审阅；历史里出现一个 batch session，逐项有 status/error。
 
 ## 6. 部署
 

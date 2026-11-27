@@ -4,10 +4,15 @@ import { DshSettings, DshSettingTab, normalizeStoredSettings, obsidianLocale, ty
 import { ChatView, VIEW_TYPE_CHAT } from './views/chat-view';
 import { SecurityConfirmModal } from './views/modals';
 import { SelectionActionModal } from './views/selection-modals';
+import { BatchNotesModal, BatchProgressModal } from './views/batch-modal';
+import { ChangeReviewModal } from './views/change-review-modal';
 import { DshClient } from './dsh/dsh-client';
-import { HistoryStore } from './core/history';
+import { HistoryStore, type HistoryRunStatus } from './core/history';
 import { resolveUserDshHome } from './dsh/paths';
-import { resolvePluginDshHome } from './dsh/dsh-runner';
+import { DshRunner, resolvePluginDshHome } from './dsh/dsh-runner';
+import { BatchController } from './core/batch-controller';
+import { BatchExecutorImpl, prepareBatchEnvironment } from './dsh/batch-runner';
+import { snapshotVault, diffSnapshots, undoChange } from './core/change-tracker';
 import { setLocale, resolveLocale, getLocale, t } from './i18n/index';
 
 export default class DshPlugin extends Plugin {
@@ -21,6 +26,8 @@ export default class DshPlugin extends Plugin {
    *  independent views, not command targets (review D-4). */
   private chatViews = new Set<ChatView>();
   history: HistoryStore | null = null;
+  private batchController: BatchController | null = null;
+  private batchRunning = false;
   private settingsChangeListeners = new Set<() => void>();
   private localeChangeListeners = new Set<() => void>();
 
@@ -115,6 +122,7 @@ export default class DshPlugin extends Plugin {
       this.removeCommand('open-harness-chat');
       this.removeCommand('ask-active-note');
       this.removeCommand('ask-selection');
+      this.removeCommand('batch-notes');
       this.registerCommands();
     }
     this.notifyLocaleChange();
@@ -149,6 +157,11 @@ export default class DshPlugin extends Plugin {
       editorCallback: (editor) => {
         this.askSelection(editor);
       },
+    });
+    this.addCommand({
+      id: 'batch-notes',
+      name: t('batch.command'),
+      callback: () => this.openBatchDialog(),
     });
     this.commandsRegistered = true;
   }
@@ -303,6 +316,121 @@ export default class DshPlugin extends Plugin {
     }
     return null;
   }
+  /** True while a batch owns the shared DSH client / vault. */
+  isBatchRunning(): boolean {
+    return this.batchRunning;
+  }
+
+  private openBatchDialog(): void {
+    if (this.batchRunning) {
+      new Notice(t('batch.busy'));
+      return;
+    }
+    if ([...this.chatViews].some((view) => view.isBusy())) {
+      new Notice(t('chat.busy'));
+      return;
+    }
+    new BatchNotesModal(this.app, (paths, instruction) => {
+      void this.runBatch(paths, instruction);
+    }).open();
+  }
+
+  /**
+   * Run one instruction over many notes, sequentially. The batch has its own
+   * history session, one snapshot before and one diff/review after; ChatView
+   * runs are refused while it is active (both write the same vault).
+   */
+  private async runBatch(paths: string[], instruction: string): Promise<void> {
+    if (this.batchRunning) {
+      new Notice(t('batch.busy'));
+      return;
+    }
+    if ([...this.chatViews].some((view) => view.isBusy())) {
+      new Notice(t('chat.busy'));
+      return;
+    }
+
+    this.batchRunning = true;
+    let cancelled = false;
+    const progress = new BatchProgressModal(this.app, () => {
+      cancelled = true;
+      this.batchController?.cancel();
+    });
+    progress.open();
+    let client: DshClient | null = null;
+    let sessionStarted = false;
+    try {
+      const runner = new DshRunner(this.settings, this.app.vault.configDir);
+      const prepared = await prepareBatchEnvironment(runner, this.getVaultRoot(), this.settings);
+      if (!prepared.ok) {
+        progress.setError(prepared.error);
+        return;
+      }
+      if (prepared.issues.length > 0) {
+        new Notice(prepared.issues.slice(0, 3).join('\n'), 8000);
+      }
+      if (cancelled) return;
+      const before = await snapshotVault(this.app);
+      if (cancelled) return;
+      await this.history?.beginSession(t('batch.sessionTitle', { count: paths.length }));
+      sessionStarted = true;
+
+      client = new DshClient();
+      const executor = new BatchExecutorImpl(client, runner, this.settings, prepared.env, instruction);
+      const controller = new BatchController(executor);
+      this.batchController = controller;
+      const result = await controller.run(paths, (items) => progress.update(items));
+
+      let lastSucceededTs = 0;
+      for (const [index, item] of result.items.entries()) {
+        const ts = Date.now() + index;
+        const status: HistoryRunStatus = item.status === 'succeeded'
+          ? 'succeeded'
+          : item.status === 'cancelled' ? 'cancelled' : 'failed';
+        await this.history?.addTurn({
+          ts,
+          user: `[${item.path}] ${instruction}`,
+          answer: item.answer ?? '',
+          durationMs: item.durationMs ?? 0,
+          status,
+          error: item.error,
+        }, {
+          model: this.settings.model,
+          effort: this.settings.reasoningEffort,
+          permission: this.settings.permissionMode,
+        });
+        if (item.status === 'succeeded') lastSucceededTs = ts;
+      }
+      let changes: Awaited<ReturnType<typeof diffSnapshots>> = [];
+      try {
+        const after = await snapshotVault(this.app);
+        changes = diffSnapshots(before, after);
+        if (changes.length > 0 && lastSucceededTs > 0) {
+          await this.history?.updateTurn(lastSucceededTs, { changedFiles: changes.map((change) => change.path) });
+        }
+      } catch {
+        // The review is advisory; a failed after-snapshot must not hide the
+        // batch result or turn successful edits into a failure.
+      }
+      // Archive only after changedFiles has been patched into the turn: once
+      // endSession() rotates `current`, updateTurn can no longer find the ts.
+      if (sessionStarted) await this.history?.endSession();
+      if (changes.length > 0) {
+        new ChangeReviewModal(this.app, changes, before.incomplete, async (change) => {
+          await undoChange(this.app, change);
+        }).open();
+      }
+      if (!cancelled) progress.finish(result, changes.length);
+    } catch (e) {
+      progress.setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      if (sessionStarted) await this.history?.endSession().catch(() => {});
+      this.batchController = null;
+      this.batchRunning = false;
+      client?.dispose();
+    }
+  }
+
   async loadSettings(): Promise<void> {
     // P1-5: data-file settings are untrusted. Option-backed fields (model /
     // reasoningEffort / permissionMode / toolExecutionMode / provider) fall

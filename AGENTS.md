@@ -16,15 +16,15 @@ DeepHarness 是 Obsidian 桌面插件（id `deepharness`），把 **DeepSeek Har
 - 每次任务固定执行 `dsh --profile headless --patch <vault.yml> "<task>"`，cwd = vault（或设置里的子目录）。
 - DSH 的完整工具链（bash、文件读写、web、subagents、skills）都可用；安全边界由 DSH 的 `DSH_PERMISSION_MODE` 沙箱策略决定，默认 `workspace-write`。
 
-## 2. 当前基线（2026-11-26，合并 main 后）
+## 2. 当前基线（2026-11-27，F3/F4 代码完成后）
 
 | 项 | 值 |
 |---|---|
-| 默认分支 | `main`；2026-11-26 R1/R2/F1/F2 手测后合入（HEAD 以 git log 为准） |
+| 默认分支 | `main`（基线 `972c990`）；当前开发分支 `feat/run-audit-and-batch` |
 | 版本 | `package.json` / `manifest.json` = `0.1.8` |
-| 测试 | `npm test` → **323 passed / 2 skipped**（19 个测试文件） |
+| 测试 | `npm test` → **339 passed / 2 skipped**（22 个测试文件） |
 | 类型 | `npx tsc --noEmit` 通过 |
-| 构建 | `npm run build` 通过（`dist/main.js` ≈149 KB） |
+| 构建 | `npm run build` 通过（`dist/main.js` ≈168 KB） |
 | Lint | `npx eslint "src/**/*.ts"` → 0 errors / 9 warnings（已知基线，不要新增） |
 | 运行时 | Node 22（CI），Obsidian 1.13+，桌面端 only |
 
@@ -40,11 +40,17 @@ src/
   dsh/
     paths.ts             所有路径解析的单点（vault 内/外、DSH_HOME）
     dsh-runner.ts        任务前准备：DSH_HOME、vault patch、persona、skills
+    batch-runner.ts      批量环境准备 + 每项 headless 执行器
     dsh-client.ts        真正的 spawn/stdio/超时/abort/进程注册表
     pure.ts              DLEVENT 解析、shim 解析等无 Obsidian 依赖的纯函数
     dsh-config.ts        settings.yaml 的读写与模型合并
   core/                  历史、诊断、技能、上下文计量、更新检查、linkify
+    batch-controller.ts  批量顺序队列：逐项状态、失败继续、取消
+    change-tracker.ts    运行前后 Markdown 快照/diff/撤销
   views/                 ChatView、面板、弹窗、mention、技能选择
+    run-controller.ts    单次运行状态机 + AbortSignal
+    selection-modals.ts  选区动作/预览
+    batch-modal.ts       批量选择/进度
 test/                    Node/jsdom 替身（obsidian stub、view double）
 docs/                    架构/开发/路线图/发布清单/历史
 ```
