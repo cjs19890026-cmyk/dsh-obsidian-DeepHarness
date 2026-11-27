@@ -115,11 +115,12 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 
 这些方向有价值，但**先 spike / 先等用户信号**，不放进近期承诺。
 
-### L1. 原生会话连续性（研究）
+### L1. 原生会话连续性（研究完成：no-go for 0.2.0）
 
-- 现状：`dsh --profile headless` 没有 `--session`；`dsh --profile tui --resume <id>` 存在。
-- 要回答：能否用自定义 profile / runner 在 headless 下恢复 session？成本、稳定性、与历史/记忆的关系？
-- 产出：spike 报告 + go/no-go；go 才排期。**在完成前，UI 不得承诺“继续上次会话”。**
+- 现状：`dsh --profile headless` 没有 `--session` / `--resume`；每次运行生成随机 session id，但 session 已持久化到 `~/.dsh/sessions`。
+- 核心 API 有 `agents.resume()` + `sessionPersistence.list()`，可做自定义 headless runner，但需要维护自定义 DSH profile（5–8 天首版 + 持续兼容成本）。
+- 结论：0.2.0 不做；保留“记忆 + transcript 恢复”，UI 不得承诺“继续上次会话”。详见 [`docs/research/session-continuity.md`](research/session-continuity.md)。
+- 重访条件：上游 headless 暴露 `--resume`；或用户明确接受 profile 安装成本；或 spike 证明 `--patch` 能加载本地 runner 插件而无需自定义 profile 包。
 
 ### L2. 自定义 DSH profile
 
@@ -153,7 +154,7 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 | Runtime | `src/views/run-controller.ts`、`src/dsh/batch-runner.ts`、`src/dsh/dsh-client.ts`、`src/dsh/dsh-runner.ts`、对应测试 | 1 agent | R1/R2/R4 已完成；F3/F4 待手测；下一步性能收敛 |
 | Workflow UX | `src/views/*`（chat-view、面板、modal）、i18n | 1 agent | F1/F2/F3/F4 已接入；待真实 vault 手测；ChatView 串行 |
 | Release/Docs | `docs/*`、README、workflows | 可与上面并行 | 不碰 src；发布前统一验证 |
-| Research | 无生产代码 | 1 agent | R3 已决策；剩 L1 会话连续性 spike |
+| Research | 无生产代码 | 1 agent | R3 已决策；L1 会话连续性 spike 已完成（no-go） |
 
 协作规则：
 
@@ -177,7 +178,7 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 1. **批量范围**：先做“文件夹批处理”，还是“多选笔记”？
    - 建议：先多选笔记（可控、易验收），文件夹批次放后面。
 2. **会话连续性**：愿意为原生 session 投入自定义 runner/profile 吗？
-   - 建议：先 spike，不预先承诺；如果成本高，保持“记忆 + transcript 恢复”。
+   - Spike 已完成：建议 0.2.0 不做（见 `docs/research/session-continuity.md`）；若用户坚持，按选项 B 排 5–8 天。
 3. **大 vault 的审阅成本**：是否加设置开关/按 workdir 缩小快照范围？
    - 建议：先观察真实耗时，再决定；默认保留 2000 文件/512KB/64MB 上限。
 
@@ -200,3 +201,5 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 | 2026-11-26 | RunController 放 `src/views/`，只持有状态 + AbortSignal | 不扩大改动面；client/stream/history 仍由 ChatView 编排，先修 stuck-Stop |
 | 2026-11-26 | 变更审阅采用运行前后 Markdown 快照，直接实现为 F2 | git 模式只覆盖 git vault；工具事件拿不到写前内容；只读模式不能替代撤销 |
 | 2026-11-26 | `feat/trusted-run-and-selection` 手测通过后合入 `main` | R1/R2/F1/F2 四项验证 + 真人测试通过；0.2.0 从 main 继续 |
+| 2026-11-27 | F3/F4 代码完成，进入真实 vault 手测 | 339 tests / tsc / build / eslint 通过；批量/历史 UI 需真人验收后才标 done |
+| 2026-11-27 | L1 会话连续性 spike：0.2.0 不做 | headless 无 resume；自定义 profile 成本高、上游可能补齐；保留记忆+transcript |
