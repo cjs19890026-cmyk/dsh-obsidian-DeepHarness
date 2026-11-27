@@ -119,8 +119,8 @@ npx eslint "src/**/*.ts"
 4. 打 tag（**不带 `v` 前缀**）：
 
    ```bash
-   git tag -a 0.1.9 -m 0.1.9
-   git push origin 0.1.9
+   git tag -a 0.2.0 -m 0.2.0
+   git push origin 0.2.0
    ```
 
 5. GitHub Actions `release.yml` 会：校验 tag == manifest version → `npm ci` → `npm test` → `npm run build` → 生成 artifact attestation → 创建**草稿** Release（附三件套）。

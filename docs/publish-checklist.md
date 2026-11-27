@@ -28,8 +28,8 @@
 发布新版本：
 
 ```bash
-git tag -a 0.1.9 -m 0.1.9   # tag 必须等于 manifest version，不带 v
-git push origin 0.1.9
+git tag -a 0.2.0 -m 0.2.0   # tag 必须等于 manifest version，不带 v
+git push origin 0.2.0
 ```
 
 Actions 完成后，到 Releases 页编辑草稿，补 release notes 并 Publish。
@@ -62,7 +62,7 @@ Actions 完成后，到 Releases 页编辑草稿，补 release notes 并 Publish
 
 | 原因 | 说明 |
 |---|---|
-| tag 带 `v` 前缀 | 必须与 manifest version 完全一致，如 `0.1.9` |
+| tag 带 `v` 前缀 | 必须与 manifest version 完全一致，如 `0.2.0` |
 | Release 缺 `main.js` | 三件套缺一不可 |
 | 仓库 private | 目录无法访问 |
 | id 含 "obsidian" | 官方硬性规则，已规避（id = `deepharness`） |

@@ -23,7 +23,7 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 
 | 项 | 值 |
 |---|---|
-| 版本 | 0.1.8（`package.json` / `manifest.json`） |
+| 版本 | 0.2.0（`package.json` / `manifest.json` / `package-lock.json`） |
 | 分支 | `main`；R1/R2/F1/F2/F3/F4 手测后合入（HEAD 以 git log 为准） |
 | 测试 | 340 passed / 2 skipped（22 文件） |
 | 已有能力 | 聊天、流式 thinking/tool、停止/超时、历史/恢复、@提及、当前笔记引用、技能、模型/推理/权限、i18n、诊断、更新检查 |
@@ -38,7 +38,7 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 5. **不提前承诺**：session 续跑、预写确认这类高不确定项，先 spike 再排期。
 6. **每条有验收标准**：没有“完成”的定义就不进 Now。
 
-## 4. Now — 0.1.9「可信运行」
+## 4. 0.1.9「可信运行」（已并入 0.2.0）
 
 目标：把运行生命周期做成可测试、可恢复的状态机；修掉“准备失败卡 running”这类信任问题。**这个版本可以没有新功能，但必须让后续功能有地基。**
 
@@ -74,9 +74,9 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 - ✅ 2026-11-26：`src/settings/types.ts:150-152` 的 HANDOFF 引用已改；`src/dsh/dsh-runner.ts:490-499` 的重复错误注释已删；`ensureObsidianSkill` 的旧技能路径注释已修正。
 - ✅ `dsh-runner.ts` / `chat-view.ts` 从 `settings/index` 的反向依赖改到 `types`/`validate`（`fb062a5`）。
 
-## 5. Next — 0.2.0「在笔记里工作」
+## 5. 0.2.0「在笔记里工作」（发布准备）
 
-> F1/F2 已完成并手测通过；F3/F4 代码与自动测试完成，待在真实 vault 手测。已完成条目保留作验收记录。
+> F1–F4 均已完成并在真实 vault 手测通过；本条保留验收记录。
 
 目标：让用户不打开聊天框也能用 agent，并且改动可见、可撤销。
 
@@ -204,3 +204,4 @@ DeepHarness 已经证明了一件事：DSH 的完整工具链可以在 Obsidian 
 | 2026-11-27 | F3/F4 代码完成，进入真实 vault 手测 | 340 tests / tsc / build / eslint 通过；批量/历史 UI 需真人验收后才标 done |
 | 2026-11-27 | L1 会话连续性 spike：0.2.0 不做 | headless 无 resume；自定义 profile 成本高、上游可能补齐；保留记忆+transcript |
 | 2026-11-27 | F3/F4 真实 vault 手测通过并合入 `main` | 批量多选/取消/审阅/历史与历史筛选/复制均走通；作为 0.2.0 的候选内容 |
+| 2026-11-27 | 进入 0.2.0 发布准备 | bump 三处 version、写 0.2.0 release notes；tag/Release 待用户确认 |

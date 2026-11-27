@@ -69,7 +69,10 @@ npm run build
 - ⚙️ **Reasoning effort (Thinking)**: switch **off / high / max** in the toolbar; written to the plugin-owned DSH_HOME, credentials are symlinked from `~/.dsh`
 - ⏹ **Stop button** (SIGTERM) and a timeout fallback (default 10 minutes)
 - 📝 **Conversation memory**: key points from earlier turns are refilled into new tasks
-- 🕘 **Session history**: conversations are archived per session; the history panel supports resume / pin / rename / note. The current session is atomically persisted after every turn — sessions not archived when Obsidian quit/crashed are restored on next launch
+- ✍️ **Selection actions**: select text → **rewrite / summarize / explain / custom**; preview the result, then replace the selection or insert it below — nothing is written until you confirm
+- 🔍 **Review & undo**: after a run, see the Markdown files that changed with a compact diff; undo one file or the whole run, no git required
+- 🗂 **Batch across notes**: pick multiple notes and run one instruction sequentially — per-item status, cancel anytime, failures don't stop the batch, one review/undo at the end
+- 🕘 **Auditable session history**: conversations are archived per session; each run records status, tools, duration, changed files, and errors. The panel supports resume / pin / rename / note, title/note and 7/30-day filters, expandable details, and copy-summary. The current session is atomically persisted after every turn — sessions not archived when Obsidian quit/crashed are restored on next launch
 - 📋 **Copy / Save as note** in one click; UI text is selectable
 - 🔗 **Reference current note**: the quote icon inserts the note you are reading — with a **text selection**, it inserts the selection as a quoted block (truncated with a source line); without a selection, a bare wikilink
 - @ **Mention notes**: type `@` to search and reference any note; inserted as `[[path]]` (scoped by the **Working directory** setting)
@@ -111,8 +114,7 @@ npm run build
 
 ## Roadmap
 
-- **0.1.9 — Trusted runs** (internal milestone, unreleased): explicit run state machine, main-chain tests, selection actions, post-run change review + undo.
-- **0.2.0 — Work in the note**: batch queue, run history/audit, native session-continuity research.
+- **0.2.0 — Work in the note**: selection actions, post-run review + undo, auditable run history, and batch processing across notes.
 - **Later**: native session continuity, custom DSH profiles, skill editing UX, recipes.
 
 Full priorities and acceptance criteria: [`docs/roadmap.md`](./docs/roadmap.md).

@@ -4,7 +4,7 @@
   <h3>让 DeepSeek Harness 住进你的 Obsidian 笔记库 ✨</h3>
   <p><b>真正的 Agent · 完整工具链 · 数据与密钥留在本机</b></p>
   <p>
-    <img src="https://img.shields.io/badge/version-0.1.8-4C8DFF?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-0.2.0-4C8DFF?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/Obsidian-1.13.0%2B-7C3AED?style=flat-square&logo=obsidian&logoColor=white" alt="Obsidian">
     <img src="https://img.shields.io/badge/license-MIT-3DA639?style=flat-square" alt="License">
     <img src="https://img.shields.io/badge/platform-desktop%20only-8A2BE2?style=flat-square" alt="Desktop only">
@@ -172,6 +172,9 @@ Copy-Item dist\main.js, dist\manifest.json, dist\styles.css "$V\.obsidian\plugin
   - 通过插件专属 DSH_HOME（`~/.dsh/deepharness/<vaultKey>/`）写入 `agent-default-model` 配置，凭据软链复用 `~/.dsh`，**不污染**全局 DSH 设置。
 - **安全模式（Security）**：只读 / 工作区写入 / 完全访问；切入「完全访问」必须二次确认。
 - **停止按钮**：SIGTERM 终止运行；**超时兜底**默认 10 分钟。
+- **选区动作**：选中文字 → 改写 / 总结 / 解释 / 自定义；结果先预览，再选择替换选区或插入下方，不确认不写入。
+- **运行后审阅 + 撤销**：每次运行结束列出改动的 Markdown 文件与 diff；可撤销单个文件或全部，不需要 git。
+- **多选笔记批量处理**：一次选择多篇笔记，按顺序执行同一指令；逐项状态、可取消、单项失败不终止整批，整批结束统一审阅/撤销。
 - **对话记忆**：前几轮要点自动回填到新任务。
 
 ### 🩺 环境检查与诊断
@@ -187,7 +190,7 @@ Copy-Item dist\main.js, dist\manifest.json, dist\styles.css "$V\.obsidian\plugin
 
 ### 🕘 会话历史
 
-- 对话按「会话」归档，历史面板支持 **恢复 / 置顶 / 重命名 / 备注 / 删除**。
+- 对话按「会话」归档；每条运行记录状态、工具、耗时、改动文件与错误，历史面板支持 **恢复 / 置顶 / 重命名 / 备注 / 删除**、标题/备注与 7/30 天筛选、展开详情、复制摘要。
 - 当前会话每轮完成后实时原子落盘；退出 / 崩溃 / 重载后未归档的会话会在下次启动自动补进历史，不丢记录。
 - 置顶会话不会被自动清理；条数上限可在设置中调整。
 
@@ -255,8 +258,7 @@ Obsidian 插件 ──spawn──▶ node <dsh入口脚本> --profile headless -
 
 ## 🗺 Roadmap
 
-- **0.1.9 — 可信运行**（内部里程碑，未发布）：显式运行状态机、主链路替身测试、选区动作、运行后 diff 审阅 + 撤销。
-- **0.2.0 — 在笔记里工作**：批量队列、运行历史/审计、原生会话连续性研究。
+- **0.2.0 — 在笔记里工作**：选区动作、运行后审阅 + 撤销、可审计的运行历史、多选笔记批量处理。
 - **更远**：原生会话连续性、自定义 DSH profile、技能编辑 UX、recipes。
 
 完整优先级与验收标准见 [`docs/roadmap.md`](./docs/roadmap.md)。
